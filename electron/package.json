@@ -1,0 +1,49 @@
+{
+  "name": "mdviewer-desktop",
+  "version": "1.0.0",
+  "description": "Standalone macOS app wrapper for mdviewer",
+  "author": "George Karypis",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node ../tools/build.js && cp ../mdviewer.html ./mdviewer.html",
+    "start": "npm run sync && electron .",
+    "selftest": "npm run sync && MDVIEWER_SELFTEST=1 electron .",
+    "dist": "npm run sync && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "net.karypis.mdviewer",
+    "productName": "mdviewer",
+    "files": [
+      "main.js",
+      "preload.js",
+      "mdviewer.html",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "identity": null,
+      "fileAssociations": [
+        {
+          "ext": "md",
+          "name": "Markdown",
+          "role": "Editor"
+        },
+        {
+          "ext": "markdown",
+          "name": "Markdown",
+          "role": "Editor"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}

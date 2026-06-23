@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mdviewer</title>
+<style>/*BUILD:hljs-css*/</style>
+<style>/*BUILD:app-css*/</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="toggleSidebar" title="Show/hide sidebar (⌘B)">☰</button>
+    <button id="openFile">Open File</button>
+    <button id="openFolder">Open Folder</button>
+    <button id="reopenLast" style="display:none"></button>
+    <span class="filename" id="filename"></span>
+    <span class="spacer"></span>
+    <button id="exportPdf" style="display:none">PDF</button>
+    <button id="clearComments" style="display:none">Clear Comments</button>
+    <button id="settingsBtn" title="Comment-style settings">⚙</button>
+    <button id="helpBtn" title="Help">?</button>
+    <span id="saveState" class="saved"><span class="dot"></span><span class="label"></span></span>
+  </div>
+
+  <div id="shell">
+    <div id="sidebar"></div>
+    <div id="docwrap">
+      <div id="empty">
+        <h1>mdviewer</h1>
+        <p>Open a Markdown file or a folder to begin.</p>
+        <button id="emptyOpen">Open File</button>
+      </div>
+      <div id="doc" style="display:none"></div>
+      <button id="commentBtn">＋ Comment</button>
+      <div id="composer">
+        <select></select>
+        <textarea placeholder="Comment…"></textarea>
+        <div class="row">
+          <button class="cancel">Cancel</button>
+          <button class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+    <div id="margin"></div>
+  </div>
+
+  <div id="toast"></div>
+
+  <div id="modalBackdrop" class="hidden"></div>
+
+  <div id="settings" class="modal hidden">
+    <h2>Comment style</h2>
+    <label>Your initials (comment tag)
+      <input id="setPrefix" maxlength="6" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="hint">New comments are written as
+      <code>&lt;!-- <span id="prefixPreview">GK</span>: your note --&gt;</code>.
+      The kinds add a suffix: <code>-FIX</code>, <code>-Q</code>, <code>-NIT</code>.</p>
+    <label>Audit-trail responder
+      <input id="setResponder" maxlength="16" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="hint">When a comment is addressed, the reply tag is
+      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.</p>
+    <p class="hint">Comments from anyone using initials-style tags
+      (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
+      everyone's notes.</p>
+    <div class="row">
+      <button class="cancel" id="setCancel">Cancel</button>
+      <button class="primary" id="setSave">Save</button>
+    </div>
+  </div>
+
+  <div id="help" class="modal modal-lg hidden">
+    <button class="modal-close" id="helpClose">×</button>
+    <h2>How mdviewer works</h2>
+    <div class="help-body">
+      <h3>Open a file</h3>
+      <p><b>Open File</b> picks a single Markdown file; <b>Open Folder</b> opens a
+        collapsible file tree (click a folder to expand it; children load on demand).
+        The picker starts in the last folder you used. <b>Reopen last</b> on launch
+        reopens your previous file/folder. Chromium browsers only.</p>
+      <h3>Read</h3>
+      <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
+        Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>.</p>
+      <h3>Edit</h3>
+      <p>Click any block (paragraph, heading, list, table, code) to edit its raw
+        Markdown in place. <b>⌘↵</b> or click away to save; <b>Esc</b> to cancel.
+        Only the block you touched changes; everything else stays byte-for-byte
+        identical, and changes autosave to disk (the toolbar shows
+        <b>Saved / Saving… / Unsaved</b>).</p>
+      <h3>Comment</h3>
+      <p>Select text and click the <b>＋ Comment</b> bubble, choose a tag, and type.
+        The comment is written into the file right after the first word of your
+        selection as <code>&lt;!-- GK: your note --&gt;</code> and shown as a card in
+        the right margin, with that word highlighted. Click a card to edit or delete.
+        <b>Clear Comments</b> removes them all at once.</p>
+      <h3>Customize the tag</h3>
+      <p>Open <b>⚙ Settings</b> to set your own initials (e.g. <code>AB</code>) and the
+        audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /
+        <code>-NIT</code> colour the cards (amber / purple / gray). Comments from other
+        people's initials render too, so files can be shared.</p>
+      <h3>Export PDF</h3>
+      <p>The <b>PDF</b> button (or <b>⌘P</b> in the desktop app) exports a clean,
+        light document with white margins. Comments are omitted from the PDF.</p>
+    </div>
+    <div class="row"><button class="primary" id="helpOk">Got it</button></div>
+  </div>
+
+  <!--lib:marked--><script>/*BUILD:marked*/</script>
+  <!--lib:purify--><script>/*BUILD:purify*/</script>
+  <!--lib:hljs--><script>/*BUILD:hljs*/</script>
+  <!--app:core--><script>/*BUILD:core*/</script>
+  <!--app:ui--><script>/*BUILD:ui*/</script>
+</body>
+</html>
