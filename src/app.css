@@ -71,6 +71,14 @@ body {
 /* ---- shell ---- */
 #shell { display: flex; flex: 1 1 auto; min-height: 0; }
 
+/* draggable column dividers between the three panels */
+.gutter {
+  flex: 0 0 6px; cursor: col-resize; background: transparent;
+  position: relative; z-index: 5;
+}
+.gutter:hover, .gutter.dragging { background: var(--accent); }
+#sidebar.hidden + #gutterLeft { display: none; }
+
 #sidebar {
   width: var(--sidebar-w);
   flex: 0 0 auto;
@@ -102,10 +110,13 @@ body {
 
 /* ---- document ---- */
 #docwrap { flex: 1 1 auto; overflow-y: auto; min-width: 0; position: relative; }
+/* Fluid width: the rendered text reflows to fill the document panel, so the
+   on-screen line length tracks the window and the panel gutters as they resize.
+   (The source file keeps its own hard-wrap column; that is independent.) */
 #doc {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 32px 40px 50vh 40px;
+  max-width: none;
+  margin: 0;
+  padding: 32px 48px 50vh 48px;
   font-size: 15px;
   line-height: 1.65;
 }
@@ -230,6 +241,32 @@ body {
 ::highlight(gk-span) { background-color: var(--hl); color: #fff; }
 /* the focused comment's span gets a bright amber marker with dark text */
 ::highlight(gk-span-active) { background-color: var(--hl-active); color: #1a1a1a; }
+/* find-in-document matches: all matches dim, current match bright */
+::highlight(search) { background-color: rgba(255, 213, 0, 0.32); color: inherit; }
+::highlight(search-current) { background-color: #ff9d2e; color: #1a1a1a; }
+
+/* ---- find-in-document bar (⌘F) ---- */
+#searchbar {
+  position: fixed; z-index: 60; top: 50px;
+  right: calc(var(--margin-w) + 22px);
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+#searchbar.hidden { display: none; }
+#searchbar input {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 8px; font-size: 13px; width: 200px; outline: none;
+}
+#searchbar input:focus { border-color: var(--accent); }
+#searchbar .search-count {
+  font-size: 11px; color: var(--text-dim); min-width: 52px; text-align: center;
+}
+#searchbar button {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 4px 8px; font-size: 12px; line-height: 1; cursor: pointer;
+}
+#searchbar button:hover { border-color: var(--accent); }
 
 /* comment composer popover */
 #composer {
@@ -317,7 +354,8 @@ body {
     height: auto !important; overflow: visible !important;
     background: #fff !important; color: #1a1a1a !important;
   }
-  #toolbar, #sidebar, #margin, #composer, #commentBtn, #toast { display: none !important; }
+  #toolbar, #sidebar, #margin, #composer, #commentBtn, #toast,
+  #searchbar, .gutter { display: none !important; }
   #shell { display: block !important; height: auto !important; min-height: 0 !important; }
   #docwrap { overflow: visible !important; height: auto !important; }
   #doc {

@@ -24,6 +24,7 @@
 
   <div id="shell">
     <div id="sidebar"></div>
+    <div class="gutter" id="gutterLeft" title="Drag to resize"></div>
     <div id="docwrap">
       <div id="empty">
         <h1>mdviewer</h1>
@@ -41,7 +42,16 @@
         </div>
       </div>
     </div>
+    <div class="gutter" id="gutterRight" title="Drag to resize"></div>
     <div id="margin"></div>
+  </div>
+
+  <div id="searchbar" class="hidden">
+    <input id="searchInput" type="text" placeholder="Find in document" autocomplete="off" spellcheck="false">
+    <span id="searchCount" class="search-count"></span>
+    <button id="searchPrev" title="Previous match (⇧⏎)">↑</button>
+    <button id="searchNext" title="Next match (⏎)">↓</button>
+    <button id="searchClose" title="Close (Esc)">×</button>
   </div>
 
   <div id="toast"></div>
@@ -64,6 +74,14 @@
     <p class="hint">Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>
+    <h2 style="margin-top:18px">Line wrapping</h2>
+    <label>Hard-wrap width (columns when saving)
+      <input id="setWrap" autocomplete="off" spellcheck="false" placeholder="auto">
+    </label>
+    <p class="hint"><code>auto</code> matches the file's existing wrap width;
+      a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
+      off. Edited paragraphs are re-wrapped to this width on save; the on-screen
+      view always reflows to the window.</p>
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>
       <button class="primary" id="setSave">Save</button>
@@ -81,7 +99,11 @@
         reopens your previous file/folder. Chromium browsers only.</p>
       <h3>Read</h3>
       <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
-        Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>.</p>
+        Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>. Drag the thin
+        bars between the panels to resize them; the widths are remembered.</p>
+      <h3>Find</h3>
+      <p>Press <b>⌘F</b> to search the document. Type to highlight matches;
+        <b>⏎</b> jumps to the next, <b>⇧⏎</b> the previous, <b>Esc</b> closes.</p>
       <h3>Edit</h3>
       <p>Click any block (paragraph, heading, list, table, code) to edit its raw
         Markdown in place. <b>⌘↵</b> or click away to save; <b>Esc</b> to cancel.
@@ -99,6 +121,12 @@
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /
         <code>-NIT</code> colour the cards (amber / purple / gray). Comments from other
         people's initials render too, so files can be shared.</p>
+      <h3>Line wrapping</h3>
+      <p>If your <code>.md</code> files are hard-wrapped to a fixed column,
+        mdviewer re-wraps edited paragraphs to that width when it saves (set it
+        under <b>⚙ Settings → Line wrapping</b>; <code>auto</code> matches the
+        file). On screen the text always reflows to the window, ignoring the
+        stored line breaks.</p>
       <h3>Export PDF</h3>
       <p>The <b>PDF</b> button (or <b>⌘P</b> in the desktop app) exports a clean,
         light document with white margins. Comments are omitted from the PDF.</p>

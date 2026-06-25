@@ -87,6 +87,14 @@ body {
 /* ---- shell ---- */
 #shell { display: flex; flex: 1 1 auto; min-height: 0; }
 
+/* draggable column dividers between the three panels */
+.gutter {
+  flex: 0 0 6px; cursor: col-resize; background: transparent;
+  position: relative; z-index: 5;
+}
+.gutter:hover, .gutter.dragging { background: var(--accent); }
+#sidebar.hidden + #gutterLeft { display: none; }
+
 #sidebar {
   width: var(--sidebar-w);
   flex: 0 0 auto;
@@ -118,10 +126,13 @@ body {
 
 /* ---- document ---- */
 #docwrap { flex: 1 1 auto; overflow-y: auto; min-width: 0; position: relative; }
+/* Fluid width: the rendered text reflows to fill the document panel, so the
+   on-screen line length tracks the window and the panel gutters as they resize.
+   (The source file keeps its own hard-wrap column; that is independent.) */
 #doc {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 32px 40px 50vh 40px;
+  max-width: none;
+  margin: 0;
+  padding: 32px 48px 50vh 48px;
   font-size: 15px;
   line-height: 1.65;
 }
@@ -246,6 +257,32 @@ body {
 ::highlight(gk-span) { background-color: var(--hl); color: #fff; }
 /* the focused comment's span gets a bright amber marker with dark text */
 ::highlight(gk-span-active) { background-color: var(--hl-active); color: #1a1a1a; }
+/* find-in-document matches: all matches dim, current match bright */
+::highlight(search) { background-color: rgba(255, 213, 0, 0.32); color: inherit; }
+::highlight(search-current) { background-color: #ff9d2e; color: #1a1a1a; }
+
+/* ---- find-in-document bar (⌘F) ---- */
+#searchbar {
+  position: fixed; z-index: 60; top: 50px;
+  right: calc(var(--margin-w) + 22px);
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+#searchbar.hidden { display: none; }
+#searchbar input {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 8px; font-size: 13px; width: 200px; outline: none;
+}
+#searchbar input:focus { border-color: var(--accent); }
+#searchbar .search-count {
+  font-size: 11px; color: var(--text-dim); min-width: 52px; text-align: center;
+}
+#searchbar button {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 4px 8px; font-size: 12px; line-height: 1; cursor: pointer;
+}
+#searchbar button:hover { border-color: var(--accent); }
 
 /* comment composer popover */
 #composer {
@@ -333,7 +370,8 @@ body {
     height: auto !important; overflow: visible !important;
     background: #fff !important; color: #1a1a1a !important;
   }
-  #toolbar, #sidebar, #margin, #composer, #commentBtn, #toast { display: none !important; }
+  #toolbar, #sidebar, #margin, #composer, #commentBtn, #toast,
+  #searchbar, .gutter { display: none !important; }
   #shell { display: block !important; height: auto !important; min-height: 0 !important; }
   #docwrap { overflow: visible !important; height: auto !important; }
   #doc {
@@ -402,6 +440,7 @@ body {
 
   <div id="shell">
     <div id="sidebar"></div>
+    <div class="gutter" id="gutterLeft" title="Drag to resize"></div>
     <div id="docwrap">
       <div id="empty">
         <h1>mdviewer</h1>
@@ -419,7 +458,16 @@ body {
         </div>
       </div>
     </div>
+    <div class="gutter" id="gutterRight" title="Drag to resize"></div>
     <div id="margin"></div>
+  </div>
+
+  <div id="searchbar" class="hidden">
+    <input id="searchInput" type="text" placeholder="Find in document" autocomplete="off" spellcheck="false">
+    <span id="searchCount" class="search-count"></span>
+    <button id="searchPrev" title="Previous match (⇧⏎)">↑</button>
+    <button id="searchNext" title="Next match (⏎)">↓</button>
+    <button id="searchClose" title="Close (Esc)">×</button>
   </div>
 
   <div id="toast"></div>
@@ -442,6 +490,14 @@ body {
     <p class="hint">Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>
+    <h2 style="margin-top:18px">Line wrapping</h2>
+    <label>Hard-wrap width (columns when saving)
+      <input id="setWrap" autocomplete="off" spellcheck="false" placeholder="auto">
+    </label>
+    <p class="hint"><code>auto</code> matches the file's existing wrap width;
+      a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
+      off. Edited paragraphs are re-wrapped to this width on save; the on-screen
+      view always reflows to the window.</p>
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>
       <button class="primary" id="setSave">Save</button>
@@ -459,7 +515,11 @@ body {
         reopens your previous file/folder. Chromium browsers only.</p>
       <h3>Read</h3>
       <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
-        Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>.</p>
+        Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>. Drag the thin
+        bars between the panels to resize them; the widths are remembered.</p>
+      <h3>Find</h3>
+      <p>Press <b>⌘F</b> to search the document. Type to highlight matches;
+        <b>⏎</b> jumps to the next, <b>⇧⏎</b> the previous, <b>Esc</b> closes.</p>
       <h3>Edit</h3>
       <p>Click any block (paragraph, heading, list, table, code) to edit its raw
         Markdown in place. <b>⌘↵</b> or click away to save; <b>Esc</b> to cancel.
@@ -477,6 +537,12 @@ body {
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /
         <code>-NIT</code> colour the cards (amber / purple / gray). Comments from other
         people's initials render too, so files can be shared.</p>
+      <h3>Line wrapping</h3>
+      <p>If your <code>.md</code> files are hard-wrapped to a fixed column,
+        mdviewer re-wraps edited paragraphs to that width when it saves (set it
+        under <b>⚙ Settings → Line wrapping</b>; <code>auto</code> matches the
+        file). On screen the text always reflows to the window, ignoring the
+        stored line breaks.</p>
       <h3>Export PDF</h3>
       <p>The <b>PDF</b> button (or <b>⌘P</b> in the desktop app) exports a clean,
         light document with white margins. Comments are omitted from the PDF.</p>
@@ -1904,6 +1970,95 @@ return He}()
     return { start: trimmed.length - m[0].length, end: trimmed.length };
   }
 
+  // ---- line-length re-wrapping (hard-wrap on save) ---------------------
+  // George's source files are hard-wrapped to a fixed column width. The viewer
+  // reflows them to the window on screen (markdown joins soft-wrapped lines),
+  // but when it WRITES a block back it must re-hard-wrap so the file on disk
+  // keeps its line-length constraint. We only ever re-wrap PARAGRAPH blocks
+  // (prose); code, tables, headings, lists, and blockquotes are left verbatim.
+
+  // True if a line carries an intentional markdown hard break (trailing two+
+  // spaces, or a backslash), which must be preserved, so we refuse to reflow.
+  function hasHardBreak(lines) {
+    for (var i = 0; i < lines.length; i++) {
+      if (/(?:[ \t]{2,}|\\)$/.test(lines[i])) return true;
+    }
+    return false;
+  }
+
+  // Reflow prose `text` to `width` columns by greedy word packing. HTML
+  // comments (<!-- GK: ... -->) are atomic tokens that are never split, even
+  // when they contain spaces, so a comment never gets broken across lines.
+  // Returns `text` unchanged when width<=0 or the text has hard breaks.
+  function wrapText(text, width) {
+    text = String(text == null ? '' : text);
+    if (!width || width <= 0) return text;
+    var lines = text.split('\n');
+    if (hasHardBreak(lines)) return text;
+    var joined = lines.join(' ');
+    var tokens = joined.match(/(?:<!--[\s\S]*?-->|\S)+/g);
+    if (!tokens) return text; // blank / whitespace only
+    var out = [];
+    var cur = '';
+    for (var i = 0; i < tokens.length; i++) {
+      var tok = tokens[i];
+      if (cur === '') cur = tok;
+      else if (cur.length + 1 + tok.length <= width) cur += ' ' + tok;
+      else { out.push(cur); cur = tok; }
+    }
+    if (cur !== '') out.push(cur);
+    return out.join('\n');
+  }
+
+  // Re-wrap a block's raw to `width`, preserving its exact trailing newlines so
+  // the surrounding block structure (blank-line separators) is untouched.
+  function wrapBlockRaw(raw, width) {
+    var trailer = raw.match(/\n*$/)[0];
+    var content = raw.slice(0, raw.length - trailer.length);
+    return wrapText(content, width) + trailer;
+  }
+
+  // Infer the file's hard-wrap column from its existing paragraphs. With greedy
+  // wrapping at a fixed width W, every non-final line of a multi-line paragraph
+  // has length <= W, and W < (that line + its next word), so the longest such
+  // line reproduces the file's wrapping exactly. Lines holding a comment are
+  // skipped (an unbreakable comment token can overrun W). Returns 0 if there is
+  // no multi-line prose to learn from.
+  function detectWrapWidth(source) {
+    var blocks = lexBlocks(source);
+    var max = 0;
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].type !== 'paragraph') continue;
+      var raw = blocks[i].raw;
+      var content = raw.slice(0, raw.length - raw.match(/\n*$/)[0].length);
+      var lines = content.split('\n');
+      if (lines.length < 2 || hasHardBreak(lines)) continue;
+      for (var k = 0; k < lines.length - 1; k++) {
+        if (lines[k].indexOf('<!--') !== -1) continue;
+        var len = lines[k].replace(/\s+$/, '').length;
+        if (len > max) max = len;
+      }
+    }
+    return max;
+  }
+
+  // Re-wrap the paragraph block that contains source offset `pos` to `width`,
+  // returning the new full source (unchanged if width<=0 or the block is not a
+  // paragraph). Used after a comment is spliced into prose so the host line
+  // does not exceed the constraint.
+  function rewrapAt(source, pos, width) {
+    if (!width || width <= 0) return source;
+    var blocks = lexBlocks(source);
+    if (!blocks.length) return source;
+    var i = blockIndexAt(blocks, pos);
+    if (i < 0) return source;
+    var b = blocks[i];
+    if (b.type !== 'paragraph') return source;
+    var nr = wrapBlockRaw(b.raw, width);
+    if (nr === b.raw) return source;
+    return spliceSource(source, b.start, b.end, nr);
+  }
+
   function locateInsertOffset(blockRaw, blockStart, prefix, selected) {
     if (!selected) return null;
     var cands = [];
@@ -1949,6 +2104,10 @@ return He}()
     commentsByBlock: commentsByBlock,
     locateInsertOffset: locateInsertOffset,
     lastWordRange: lastWordRange,
+    wrapText: wrapText,
+    wrapBlockRaw: wrapBlockRaw,
+    detectWrapWidth: detectWrapWidth,
+    rewrapAt: rewrapAt,
   };
 });
 </script>
@@ -1961,13 +2120,14 @@ return He}()
   var docEl, docwrap, marginEl, sidebar, composer, commentBtn, toastEl;
 
   var KINDS = ['', '-FIX', '-Q', '-NIT']; // suffixes appended to the prefix
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE' };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' };
 
   var state = {
     fileHandle: null,
     dirHandle: null,
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE' }, // comment style (customizable)
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' }, // comment style + wrap
+    detectedWidth: 0,     // hard-wrap column inferred from the loaded file
     source: '',
     blocks: [],
     comments: [],
@@ -1977,7 +2137,17 @@ return He}()
     saveTimer: null,
     activeComment: null,  // id of focused comment
     composerMode: null,   // {type:'new', pos} or {type:'edit', comment}
+    search: { open: false, query: '', matches: [], current: -1 },
   };
+
+  // The effective hard-wrap width: 'auto' uses the width detected from the
+  // file; a number forces it; 0 (or unset) disables re-wrapping on save.
+  function effectiveWrap() {
+    var w = state.settings.wrap;
+    if (w == null || w === 'auto') return state.detectedWidth || 0;
+    var n = parseInt(w, 10);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
 
   // ---- save state indicator --------------------------------------------
   function setSaveState(s, msg) {
@@ -2268,6 +2438,7 @@ return He}()
   // ---- core render ------------------------------------------------------
   function setSource(text) {
     state.source = text;
+    state.detectedWidth = MDCore.detectWrapWidth(text); // learn the file's wrap column
     relex();
     renderAll();
   }
@@ -2289,6 +2460,8 @@ return He}()
     $('exportPdf').style.display = state.source ? 'inline-block' : 'none';
     docwrap.scrollTop = scroll;
     marginEl.scrollTop = scroll;
+    // The re-render replaced the document nodes; rebuild search ranges in place.
+    if (state.search.open && state.search.query) runSearch(state.search.query, true);
   }
 
   function sanitize(html) {
@@ -2563,6 +2736,7 @@ return He}()
         var s = JSON.parse(raw);
         if (s.prefix) state.settings.prefix = s.prefix;
         if (s.responder) state.settings.responder = s.responder;
+        if (s.wrap != null) state.settings.wrap = s.wrap;
       }
     } catch (e) { /* defaults */ }
   }
@@ -2573,6 +2747,14 @@ return He}()
   // Tags are uppercase letters/digits; responder allows letters/digits/-.
   function cleanPrefix(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); }
   function cleanResponder(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16); }
+  // Wrap setting: 'auto', or a non-negative integer as a string (0 = off).
+  function cleanWrap(s) {
+    var t = String(s == null ? '' : s).trim().toLowerCase();
+    if (t === '' || t === 'auto') return 'auto';
+    var n = parseInt(t, 10);
+    if (!isFinite(n) || n < 0) return 'auto';
+    return String(Math.min(n, 400));
+  }
 
   // Build the composer's variant dropdown from the configured prefix.
   function populateVariants() {
@@ -2589,6 +2771,7 @@ return He}()
   function openSettings() {
     $('setPrefix').value = state.settings.prefix;
     $('setResponder').value = state.settings.responder;
+    $('setWrap').value = state.settings.wrap === 'auto' ? '' : state.settings.wrap;
     $('prefixPreview').textContent = state.settings.prefix;
     $('respPreview').textContent = state.settings.responder;
     showModal('settings');
@@ -2599,6 +2782,7 @@ return He}()
     var responder = cleanResponder($('setResponder').value) || DEFAULT_SETTINGS.responder;
     state.settings.prefix = prefix;
     state.settings.responder = responder;
+    state.settings.wrap = cleanWrap($('setWrap').value);
     persistSettings();
     populateVariants();
     closeModal();
@@ -2653,11 +2837,17 @@ return He}()
     var body = composer.querySelector('textarea').value.trim();
     if (!body) { closeComposer(); return; }
     var text = MDCore.serializeComment(tag, body);
+    var at;
     if (mode.type === 'new') {
+      at = mode.pos;
       state.source = MDCore.spliceSource(state.source, mode.pos, mode.pos, text);
     } else {
+      at = mode.comment.start;
       state.source = MDCore.spliceSource(state.source, mode.comment.start, mode.comment.end, text);
     }
+    // Splicing a comment into a paragraph can overrun the wrap column; re-wrap
+    // its host block so the saved line stays within the constraint.
+    state.source = MDCore.rewrapAt(state.source, at, effectiveWrap());
     closeComposer();
     relex(); renderAll(); scheduleSave(true);
   }
@@ -2720,6 +2910,9 @@ return He}()
     if (!ta) { state.editing = null; return; }
     var block = ta._block;
     var newRaw = ta.value + ta._trailer;
+    // Re-hard-wrap prose to the file's column width so the saved file keeps its
+    // line-length constraint. Only paragraphs; code/tables/lists stay verbatim.
+    if (block.type === 'paragraph') newRaw = MDCore.wrapBlockRaw(newRaw, effectiveWrap());
     state.editing = null;
     if (newRaw === block.raw) { renderAll(); return; }
     state.source = MDCore.replaceRange(state.source, block.start, block.end, newRaw);
@@ -2737,6 +2930,166 @@ return He}()
     if (sel && !sel.isCollapsed) return; // selection -> comment flow
     var blockEl = e.target.closest('.block');
     if (blockEl) enterEdit(parseInt(blockEl.dataset.idx, 10));
+  }
+
+  // ---- find in document (⌘F) -------------------------------------------
+  // Builds a flat index of the document's text nodes, finds every occurrence of
+  // the query, and paints them with the CSS Custom Highlight API (all matches
+  // dim, the current match bright). Ranges are recomputed whenever the document
+  // re-renders, so highlights survive edits while the bar is open.
+  function docTextIndex() {
+    var walker = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var total = 0;
+    var n;
+    while ((n = walker.nextNode())) {
+      var len = n.nodeValue.length;
+      nodes.push({ node: n, start: total, len: len });
+      total += len;
+    }
+    return { nodes: nodes, text: nodes.map(function (x) { return x.node.nodeValue; }).join('') };
+  }
+
+  function clearSearchHighlights() {
+    if (CSS && CSS.highlights) { CSS.highlights.delete('search'); CSS.highlights.delete('search-current'); }
+  }
+
+  function paintSearch() {
+    if (typeof Highlight === 'undefined' || !CSS.highlights) return;
+    var all = new Highlight(), cur = new Highlight();
+    for (var i = 0; i < state.search.matches.length; i++) {
+      if (i === state.search.current) cur.add(state.search.matches[i]);
+      else all.add(state.search.matches[i]);
+    }
+    if (all.size) CSS.highlights.set('search', all); else CSS.highlights.delete('search');
+    if (cur.size) CSS.highlights.set('search-current', cur); else CSS.highlights.delete('search-current');
+  }
+
+  function updateSearchUI() {
+    var n = state.search.matches.length;
+    var c = $('searchCount');
+    if (!state.search.query) c.textContent = '';
+    else if (!n) c.textContent = 'No results';
+    else c.textContent = (state.search.current + 1) + ' of ' + n;
+  }
+
+  function runSearch(query, keepCurrent) {
+    var changed = query !== state.search.query;
+    state.search.query = query;
+    clearSearchHighlights();
+    var ranges = [];
+    if (query && state.source) {
+      var idx = docTextIndex();
+      var hay = idx.text.toLowerCase();
+      var needle = query.toLowerCase();
+      var from = 0, pos;
+      while ((pos = hay.indexOf(needle, from)) !== -1) {
+        var s = charToNodeOffset(idx.nodes, pos);
+        var e = charToNodeOffset(idx.nodes, pos + needle.length);
+        var r = document.createRange();
+        try { r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); ranges.push(r); }
+        catch (err) { /* skip an un-rangeable span */ }
+        from = pos + needle.length;
+        if (ranges.length > 5000) break;
+      }
+    }
+    state.search.matches = ranges;
+    if (!ranges.length) state.search.current = -1;
+    else if (changed && !keepCurrent) state.search.current = 0;
+    else state.search.current = Math.max(0, Math.min(state.search.current, ranges.length - 1));
+    paintSearch();
+    updateSearchUI();
+    if (!keepCurrent && state.search.current >= 0) scrollToMatch(state.search.current);
+  }
+
+  function scrollToMatch(i) {
+    var r = state.search.matches[i];
+    if (!r) return;
+    var rect = r.getBoundingClientRect();
+    var wrapRect = docwrap.getBoundingClientRect();
+    if (rect.top < wrapRect.top + 56 || rect.bottom > wrapRect.bottom - 16) {
+      docwrap.scrollTop += (rect.top - wrapRect.top) - docwrap.clientHeight / 2;
+      marginEl.scrollTop = docwrap.scrollTop;
+    }
+  }
+
+  function searchStep(dir) {
+    var n = state.search.matches.length;
+    if (!n) return;
+    state.search.current = (state.search.current + dir + n) % n;
+    paintSearch();
+    updateSearchUI();
+    scrollToMatch(state.search.current);
+  }
+
+  function openSearch() {
+    state.search.open = true;
+    $('searchbar').classList.remove('hidden');
+    var inp = $('searchInput');
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) inp.value = sel.toString().trim();
+    inp.focus(); inp.select();
+    if (inp.value) runSearch(inp.value);
+  }
+
+  function closeSearch() {
+    state.search.open = false;
+    $('searchbar').classList.add('hidden');
+    clearSearchHighlights();
+    state.search.matches = []; state.search.current = -1;
+  }
+
+  // ---- resizable panels -------------------------------------------------
+  function applyLayout(layout) {
+    if (!layout) return;
+    var root = document.documentElement;
+    if (layout.sidebar) root.style.setProperty('--sidebar-w', layout.sidebar + 'px');
+    if (layout.margin) root.style.setProperty('--margin-w', layout.margin + 'px');
+  }
+  function persistLayout() {
+    try {
+      var cs = getComputedStyle(document.documentElement);
+      localStorage.setItem('mdviewer.layout', JSON.stringify({
+        sidebar: parseInt(cs.getPropertyValue('--sidebar-w'), 10),
+        margin: parseInt(cs.getPropertyValue('--margin-w'), 10),
+      }));
+    } catch (e) { /* non-fatal */ }
+  }
+  function loadLayout() {
+    try {
+      var raw = localStorage.getItem('mdviewer.layout');
+      if (raw) applyLayout(JSON.parse(raw));
+    } catch (e) { /* defaults */ }
+  }
+  function setupGutter(el, side) {
+    el.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var shellRect = $('shell').getBoundingClientRect();
+      el.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      function onMove(ev) {
+        var w;
+        if (side === 'left') {
+          w = Math.max(140, Math.min(ev.clientX - shellRect.left, 560));
+          document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+        } else {
+          w = Math.max(180, Math.min(shellRect.right - ev.clientX, 680));
+          document.documentElement.style.setProperty('--margin-w', w + 'px');
+        }
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        el.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        persistLayout();
+        if (state.source) renderComments();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   function init() {
@@ -2766,6 +3119,22 @@ return He}()
     $('setResponder').addEventListener('input', function () {
       $('respPreview').textContent = cleanResponder(this.value) || DEFAULT_SETTINGS.responder;
     });
+
+    // find-in-document bar
+    $('searchInput').addEventListener('input', function () { runSearch(this.value); });
+    $('searchInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); searchStep(e.shiftKey ? -1 : 1); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); docwrap.focus(); }
+    });
+    $('searchNext').addEventListener('click', function () { searchStep(1); });
+    $('searchPrev').addEventListener('click', function () { searchStep(-1); });
+    $('searchClose').addEventListener('click', closeSearch);
+
+    // resizable panels
+    loadLayout();
+    setupGutter($('gutterLeft'), 'left');
+    setupGutter($('gutterRight'), 'right');
+
     docEl.addEventListener('click', onDocClick);
     docEl.addEventListener('mouseup', onDocMouseUp);
     commentBtn.addEventListener('click', beginNewComment);
@@ -2779,8 +3148,14 @@ return He}()
     window.addEventListener('resize', function () { if (state.source) renderComments(); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !$('modalBackdrop').classList.contains('hidden')) { closeModal(); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); writeFile(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
+      if (e.key === 'Escape' && state.search.open) { e.preventDefault(); closeSearch(); return; }
+      var mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openSearch(); }
+      else if (mod && (e.key === 'g' || e.key === 'G')) {
+        if (state.search.open) { e.preventDefault(); searchStep(e.shiftKey ? -1 : 1); }
+      }
+      else if (mod && e.key === 's') { e.preventDefault(); writeFile(); }
+      else if (mod && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
     });
 
     // Remember the folder to start pickers in (set once you open a folder).
@@ -2812,6 +3187,8 @@ return He}()
         sidebar: function () { return sidebar; },
         openSettings: openSettings, saveSettings: saveSettings, showModal: showModal,
         closeModal: closeModal, populateVariants: populateVariants,
+        openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
+        searchStep: searchStep, effectiveWrap: effectiveWrap,
       };
     }
     if (location.search.indexOf('selftest') !== -1) setTimeout(runSelfTest, 50);
@@ -3053,7 +3430,7 @@ return He}()
       state.dirHandle = null;
 
       // --- customizable comment style + help ----------------------------
-      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder };
+      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap };
       populateVariants();
       var optVals = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants from prefix (GK default)',
@@ -3085,6 +3462,81 @@ return He}()
       check('help explains commenting', $('help').textContent.indexOf('Comment') !== -1);
       closeModal();
       check('help overlay closes', $('help').classList.contains('hidden'));
+
+      // --- find in document (⌘F) -----------------------------------------
+      state.settings.wrap = '0'; // keep editing tests below from re-wrapping yet
+      setSource('# Doc\n\nThe word target appears here, and target again, plus TARGET upper.\n\nAnother para with no hits at all.\n');
+      openSearch();
+      $('searchInput').value = 'target';
+      runSearch('target');
+      check('search finds all matches, case-insensitively', state.search.matches.length === 3);
+      check('search registers a CSS custom highlight',
+        typeof Highlight !== 'undefined' && CSS.highlights && CSS.highlights.has('search-current'));
+      check('search count shows current position', $('searchCount').textContent === '1 of 3');
+      check('current match text equals the query', state.search.matches[0].toString().toLowerCase() === 'target');
+      searchStep(1);
+      check('search next advances the current match', state.search.current === 1 && $('searchCount').textContent === '2 of 3');
+      searchStep(-1);
+      check('search prev steps back', state.search.current === 0);
+      runSearch('nonexistent-zzz');
+      check('search reports no results', state.search.matches.length === 0 && $('searchCount').textContent === 'No results');
+      closeSearch();
+      check('search closes and clears its highlights',
+        !state.search.open && !(CSS.highlights && CSS.highlights.has('search')));
+
+      // --- hard-wrap on save: forced width -------------------------------
+      var firstPara = function () {
+        for (var i = 0; i < state.blocks.length; i++) if (state.blocks[i].type === 'paragraph') return i;
+        return -1;
+      };
+      state.settings.wrap = '24';
+      setSource('Edit me please.\n');
+      var wi = firstPara();
+      enterEdit(wi);
+      docEl.querySelector('.block[data-idx="' + wi + '"] textarea').value =
+        'one two three four five six seven eight nine ten eleven twelve';
+      commitEdit(wi);
+      var wlines = state.source.replace(/\n+$/, '').split('\n');
+      check('edited paragraph hard-wrapped to <=24 columns',
+        wlines.length > 1 && wlines.every(function (l) { return l.length <= 24; }));
+      check('wrapping preserved every word',
+        state.source.replace(/\n/g, ' ').trim() === 'one two three four five six seven eight nine ten eleven twelve');
+
+      // --- hard-wrap on save: auto-detected width ------------------------
+      state.settings.wrap = 'auto';
+      var sample40 = MDCore.wrapText(
+        'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho', 40);
+      setSource(sample40 + '\n');
+      check('auto detects the file wrap column', state.detectedWidth > 0 && state.detectedWidth <= 40);
+      check('effective wrap follows auto-detection', effectiveWrap() === state.detectedWidth);
+      var ai = firstPara();
+      enterEdit(ai);
+      docEl.querySelector('.block[data-idx="' + ai + '"] textarea').value = sample40.replace(/\n/g, ' ');
+      commitEdit(ai);
+      check('auto re-wrap reproduces the file wrapping exactly',
+        state.source.replace(/\n+$/, '') === sample40);
+
+      // --- resizable panels: gutter drag adjusts widths ------------------
+      var shellRect = $('shell').getBoundingClientRect();
+      var gl = $('gutterLeft');
+      gl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: shellRect.left + 240 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: shellRect.left + 320 }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      var sbw = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10);
+      check('left gutter drag resizes the sidebar', sbw === 320);
+      check('panel layout persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.layout')).sidebar === 320);
+      var gr = $('gutterRight');
+      gr.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: shellRect.right - 350 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: shellRect.right - 350 }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      var mgw = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--margin-w'), 10);
+      check('right gutter drag resizes the comment margin', mgw === 350);
+      check('left gutter hides with the sidebar',
+        getComputedStyle((sidebar.classList.add('hidden'), $('gutterLeft'))).display === 'none');
+      sidebar.classList.remove('hidden');
+
+      state.settings = savedSettings; persistSettings();
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {

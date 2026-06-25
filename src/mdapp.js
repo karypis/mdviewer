@@ -7,13 +7,14 @@
   var docEl, docwrap, marginEl, sidebar, composer, commentBtn, toastEl;
 
   var KINDS = ['', '-FIX', '-Q', '-NIT']; // suffixes appended to the prefix
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE' };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' };
 
   var state = {
     fileHandle: null,
     dirHandle: null,
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE' }, // comment style (customizable)
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' }, // comment style + wrap
+    detectedWidth: 0,     // hard-wrap column inferred from the loaded file
     source: '',
     blocks: [],
     comments: [],
@@ -23,7 +24,17 @@
     saveTimer: null,
     activeComment: null,  // id of focused comment
     composerMode: null,   // {type:'new', pos} or {type:'edit', comment}
+    search: { open: false, query: '', matches: [], current: -1 },
   };
+
+  // The effective hard-wrap width: 'auto' uses the width detected from the
+  // file; a number forces it; 0 (or unset) disables re-wrapping on save.
+  function effectiveWrap() {
+    var w = state.settings.wrap;
+    if (w == null || w === 'auto') return state.detectedWidth || 0;
+    var n = parseInt(w, 10);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
 
   // ---- save state indicator --------------------------------------------
   function setSaveState(s, msg) {
@@ -314,6 +325,7 @@
   // ---- core render ------------------------------------------------------
   function setSource(text) {
     state.source = text;
+    state.detectedWidth = MDCore.detectWrapWidth(text); // learn the file's wrap column
     relex();
     renderAll();
   }
@@ -335,6 +347,8 @@
     $('exportPdf').style.display = state.source ? 'inline-block' : 'none';
     docwrap.scrollTop = scroll;
     marginEl.scrollTop = scroll;
+    // The re-render replaced the document nodes; rebuild search ranges in place.
+    if (state.search.open && state.search.query) runSearch(state.search.query, true);
   }
 
   function sanitize(html) {
@@ -609,6 +623,7 @@
         var s = JSON.parse(raw);
         if (s.prefix) state.settings.prefix = s.prefix;
         if (s.responder) state.settings.responder = s.responder;
+        if (s.wrap != null) state.settings.wrap = s.wrap;
       }
     } catch (e) { /* defaults */ }
   }
@@ -619,6 +634,14 @@
   // Tags are uppercase letters/digits; responder allows letters/digits/-.
   function cleanPrefix(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); }
   function cleanResponder(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16); }
+  // Wrap setting: 'auto', or a non-negative integer as a string (0 = off).
+  function cleanWrap(s) {
+    var t = String(s == null ? '' : s).trim().toLowerCase();
+    if (t === '' || t === 'auto') return 'auto';
+    var n = parseInt(t, 10);
+    if (!isFinite(n) || n < 0) return 'auto';
+    return String(Math.min(n, 400));
+  }
 
   // Build the composer's variant dropdown from the configured prefix.
   function populateVariants() {
@@ -635,6 +658,7 @@
   function openSettings() {
     $('setPrefix').value = state.settings.prefix;
     $('setResponder').value = state.settings.responder;
+    $('setWrap').value = state.settings.wrap === 'auto' ? '' : state.settings.wrap;
     $('prefixPreview').textContent = state.settings.prefix;
     $('respPreview').textContent = state.settings.responder;
     showModal('settings');
@@ -645,6 +669,7 @@
     var responder = cleanResponder($('setResponder').value) || DEFAULT_SETTINGS.responder;
     state.settings.prefix = prefix;
     state.settings.responder = responder;
+    state.settings.wrap = cleanWrap($('setWrap').value);
     persistSettings();
     populateVariants();
     closeModal();
@@ -699,11 +724,17 @@
     var body = composer.querySelector('textarea').value.trim();
     if (!body) { closeComposer(); return; }
     var text = MDCore.serializeComment(tag, body);
+    var at;
     if (mode.type === 'new') {
+      at = mode.pos;
       state.source = MDCore.spliceSource(state.source, mode.pos, mode.pos, text);
     } else {
+      at = mode.comment.start;
       state.source = MDCore.spliceSource(state.source, mode.comment.start, mode.comment.end, text);
     }
+    // Splicing a comment into a paragraph can overrun the wrap column; re-wrap
+    // its host block so the saved line stays within the constraint.
+    state.source = MDCore.rewrapAt(state.source, at, effectiveWrap());
     closeComposer();
     relex(); renderAll(); scheduleSave(true);
   }
@@ -766,6 +797,9 @@
     if (!ta) { state.editing = null; return; }
     var block = ta._block;
     var newRaw = ta.value + ta._trailer;
+    // Re-hard-wrap prose to the file's column width so the saved file keeps its
+    // line-length constraint. Only paragraphs; code/tables/lists stay verbatim.
+    if (block.type === 'paragraph') newRaw = MDCore.wrapBlockRaw(newRaw, effectiveWrap());
     state.editing = null;
     if (newRaw === block.raw) { renderAll(); return; }
     state.source = MDCore.replaceRange(state.source, block.start, block.end, newRaw);
@@ -783,6 +817,166 @@
     if (sel && !sel.isCollapsed) return; // selection -> comment flow
     var blockEl = e.target.closest('.block');
     if (blockEl) enterEdit(parseInt(blockEl.dataset.idx, 10));
+  }
+
+  // ---- find in document (⌘F) -------------------------------------------
+  // Builds a flat index of the document's text nodes, finds every occurrence of
+  // the query, and paints them with the CSS Custom Highlight API (all matches
+  // dim, the current match bright). Ranges are recomputed whenever the document
+  // re-renders, so highlights survive edits while the bar is open.
+  function docTextIndex() {
+    var walker = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var total = 0;
+    var n;
+    while ((n = walker.nextNode())) {
+      var len = n.nodeValue.length;
+      nodes.push({ node: n, start: total, len: len });
+      total += len;
+    }
+    return { nodes: nodes, text: nodes.map(function (x) { return x.node.nodeValue; }).join('') };
+  }
+
+  function clearSearchHighlights() {
+    if (CSS && CSS.highlights) { CSS.highlights.delete('search'); CSS.highlights.delete('search-current'); }
+  }
+
+  function paintSearch() {
+    if (typeof Highlight === 'undefined' || !CSS.highlights) return;
+    var all = new Highlight(), cur = new Highlight();
+    for (var i = 0; i < state.search.matches.length; i++) {
+      if (i === state.search.current) cur.add(state.search.matches[i]);
+      else all.add(state.search.matches[i]);
+    }
+    if (all.size) CSS.highlights.set('search', all); else CSS.highlights.delete('search');
+    if (cur.size) CSS.highlights.set('search-current', cur); else CSS.highlights.delete('search-current');
+  }
+
+  function updateSearchUI() {
+    var n = state.search.matches.length;
+    var c = $('searchCount');
+    if (!state.search.query) c.textContent = '';
+    else if (!n) c.textContent = 'No results';
+    else c.textContent = (state.search.current + 1) + ' of ' + n;
+  }
+
+  function runSearch(query, keepCurrent) {
+    var changed = query !== state.search.query;
+    state.search.query = query;
+    clearSearchHighlights();
+    var ranges = [];
+    if (query && state.source) {
+      var idx = docTextIndex();
+      var hay = idx.text.toLowerCase();
+      var needle = query.toLowerCase();
+      var from = 0, pos;
+      while ((pos = hay.indexOf(needle, from)) !== -1) {
+        var s = charToNodeOffset(idx.nodes, pos);
+        var e = charToNodeOffset(idx.nodes, pos + needle.length);
+        var r = document.createRange();
+        try { r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); ranges.push(r); }
+        catch (err) { /* skip an un-rangeable span */ }
+        from = pos + needle.length;
+        if (ranges.length > 5000) break;
+      }
+    }
+    state.search.matches = ranges;
+    if (!ranges.length) state.search.current = -1;
+    else if (changed && !keepCurrent) state.search.current = 0;
+    else state.search.current = Math.max(0, Math.min(state.search.current, ranges.length - 1));
+    paintSearch();
+    updateSearchUI();
+    if (!keepCurrent && state.search.current >= 0) scrollToMatch(state.search.current);
+  }
+
+  function scrollToMatch(i) {
+    var r = state.search.matches[i];
+    if (!r) return;
+    var rect = r.getBoundingClientRect();
+    var wrapRect = docwrap.getBoundingClientRect();
+    if (rect.top < wrapRect.top + 56 || rect.bottom > wrapRect.bottom - 16) {
+      docwrap.scrollTop += (rect.top - wrapRect.top) - docwrap.clientHeight / 2;
+      marginEl.scrollTop = docwrap.scrollTop;
+    }
+  }
+
+  function searchStep(dir) {
+    var n = state.search.matches.length;
+    if (!n) return;
+    state.search.current = (state.search.current + dir + n) % n;
+    paintSearch();
+    updateSearchUI();
+    scrollToMatch(state.search.current);
+  }
+
+  function openSearch() {
+    state.search.open = true;
+    $('searchbar').classList.remove('hidden');
+    var inp = $('searchInput');
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) inp.value = sel.toString().trim();
+    inp.focus(); inp.select();
+    if (inp.value) runSearch(inp.value);
+  }
+
+  function closeSearch() {
+    state.search.open = false;
+    $('searchbar').classList.add('hidden');
+    clearSearchHighlights();
+    state.search.matches = []; state.search.current = -1;
+  }
+
+  // ---- resizable panels -------------------------------------------------
+  function applyLayout(layout) {
+    if (!layout) return;
+    var root = document.documentElement;
+    if (layout.sidebar) root.style.setProperty('--sidebar-w', layout.sidebar + 'px');
+    if (layout.margin) root.style.setProperty('--margin-w', layout.margin + 'px');
+  }
+  function persistLayout() {
+    try {
+      var cs = getComputedStyle(document.documentElement);
+      localStorage.setItem('mdviewer.layout', JSON.stringify({
+        sidebar: parseInt(cs.getPropertyValue('--sidebar-w'), 10),
+        margin: parseInt(cs.getPropertyValue('--margin-w'), 10),
+      }));
+    } catch (e) { /* non-fatal */ }
+  }
+  function loadLayout() {
+    try {
+      var raw = localStorage.getItem('mdviewer.layout');
+      if (raw) applyLayout(JSON.parse(raw));
+    } catch (e) { /* defaults */ }
+  }
+  function setupGutter(el, side) {
+    el.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var shellRect = $('shell').getBoundingClientRect();
+      el.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      function onMove(ev) {
+        var w;
+        if (side === 'left') {
+          w = Math.max(140, Math.min(ev.clientX - shellRect.left, 560));
+          document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+        } else {
+          w = Math.max(180, Math.min(shellRect.right - ev.clientX, 680));
+          document.documentElement.style.setProperty('--margin-w', w + 'px');
+        }
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        el.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        persistLayout();
+        if (state.source) renderComments();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   function init() {
@@ -812,6 +1006,22 @@
     $('setResponder').addEventListener('input', function () {
       $('respPreview').textContent = cleanResponder(this.value) || DEFAULT_SETTINGS.responder;
     });
+
+    // find-in-document bar
+    $('searchInput').addEventListener('input', function () { runSearch(this.value); });
+    $('searchInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); searchStep(e.shiftKey ? -1 : 1); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); docwrap.focus(); }
+    });
+    $('searchNext').addEventListener('click', function () { searchStep(1); });
+    $('searchPrev').addEventListener('click', function () { searchStep(-1); });
+    $('searchClose').addEventListener('click', closeSearch);
+
+    // resizable panels
+    loadLayout();
+    setupGutter($('gutterLeft'), 'left');
+    setupGutter($('gutterRight'), 'right');
+
     docEl.addEventListener('click', onDocClick);
     docEl.addEventListener('mouseup', onDocMouseUp);
     commentBtn.addEventListener('click', beginNewComment);
@@ -825,8 +1035,14 @@
     window.addEventListener('resize', function () { if (state.source) renderComments(); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !$('modalBackdrop').classList.contains('hidden')) { closeModal(); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); writeFile(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
+      if (e.key === 'Escape' && state.search.open) { e.preventDefault(); closeSearch(); return; }
+      var mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openSearch(); }
+      else if (mod && (e.key === 'g' || e.key === 'G')) {
+        if (state.search.open) { e.preventDefault(); searchStep(e.shiftKey ? -1 : 1); }
+      }
+      else if (mod && e.key === 's') { e.preventDefault(); writeFile(); }
+      else if (mod && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
     });
 
     // Remember the folder to start pickers in (set once you open a folder).
@@ -858,6 +1074,8 @@
         sidebar: function () { return sidebar; },
         openSettings: openSettings, saveSettings: saveSettings, showModal: showModal,
         closeModal: closeModal, populateVariants: populateVariants,
+        openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
+        searchStep: searchStep, effectiveWrap: effectiveWrap,
       };
     }
     if (location.search.indexOf('selftest') !== -1) setTimeout(runSelfTest, 50);
@@ -1099,7 +1317,7 @@
       state.dirHandle = null;
 
       // --- customizable comment style + help ----------------------------
-      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder };
+      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap };
       populateVariants();
       var optVals = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants from prefix (GK default)',
@@ -1131,6 +1349,81 @@
       check('help explains commenting', $('help').textContent.indexOf('Comment') !== -1);
       closeModal();
       check('help overlay closes', $('help').classList.contains('hidden'));
+
+      // --- find in document (⌘F) -----------------------------------------
+      state.settings.wrap = '0'; // keep editing tests below from re-wrapping yet
+      setSource('# Doc\n\nThe word target appears here, and target again, plus TARGET upper.\n\nAnother para with no hits at all.\n');
+      openSearch();
+      $('searchInput').value = 'target';
+      runSearch('target');
+      check('search finds all matches, case-insensitively', state.search.matches.length === 3);
+      check('search registers a CSS custom highlight',
+        typeof Highlight !== 'undefined' && CSS.highlights && CSS.highlights.has('search-current'));
+      check('search count shows current position', $('searchCount').textContent === '1 of 3');
+      check('current match text equals the query', state.search.matches[0].toString().toLowerCase() === 'target');
+      searchStep(1);
+      check('search next advances the current match', state.search.current === 1 && $('searchCount').textContent === '2 of 3');
+      searchStep(-1);
+      check('search prev steps back', state.search.current === 0);
+      runSearch('nonexistent-zzz');
+      check('search reports no results', state.search.matches.length === 0 && $('searchCount').textContent === 'No results');
+      closeSearch();
+      check('search closes and clears its highlights',
+        !state.search.open && !(CSS.highlights && CSS.highlights.has('search')));
+
+      // --- hard-wrap on save: forced width -------------------------------
+      var firstPara = function () {
+        for (var i = 0; i < state.blocks.length; i++) if (state.blocks[i].type === 'paragraph') return i;
+        return -1;
+      };
+      state.settings.wrap = '24';
+      setSource('Edit me please.\n');
+      var wi = firstPara();
+      enterEdit(wi);
+      docEl.querySelector('.block[data-idx="' + wi + '"] textarea').value =
+        'one two three four five six seven eight nine ten eleven twelve';
+      commitEdit(wi);
+      var wlines = state.source.replace(/\n+$/, '').split('\n');
+      check('edited paragraph hard-wrapped to <=24 columns',
+        wlines.length > 1 && wlines.every(function (l) { return l.length <= 24; }));
+      check('wrapping preserved every word',
+        state.source.replace(/\n/g, ' ').trim() === 'one two three four five six seven eight nine ten eleven twelve');
+
+      // --- hard-wrap on save: auto-detected width ------------------------
+      state.settings.wrap = 'auto';
+      var sample40 = MDCore.wrapText(
+        'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho', 40);
+      setSource(sample40 + '\n');
+      check('auto detects the file wrap column', state.detectedWidth > 0 && state.detectedWidth <= 40);
+      check('effective wrap follows auto-detection', effectiveWrap() === state.detectedWidth);
+      var ai = firstPara();
+      enterEdit(ai);
+      docEl.querySelector('.block[data-idx="' + ai + '"] textarea').value = sample40.replace(/\n/g, ' ');
+      commitEdit(ai);
+      check('auto re-wrap reproduces the file wrapping exactly',
+        state.source.replace(/\n+$/, '') === sample40);
+
+      // --- resizable panels: gutter drag adjusts widths ------------------
+      var shellRect = $('shell').getBoundingClientRect();
+      var gl = $('gutterLeft');
+      gl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: shellRect.left + 240 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: shellRect.left + 320 }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      var sbw = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10);
+      check('left gutter drag resizes the sidebar', sbw === 320);
+      check('panel layout persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.layout')).sidebar === 320);
+      var gr = $('gutterRight');
+      gr.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: shellRect.right - 350 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: shellRect.right - 350 }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      var mgw = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--margin-w'), 10);
+      check('right gutter drag resizes the comment margin', mgw === 350);
+      check('left gutter hides with the sidebar',
+        getComputedStyle((sidebar.classList.add('hidden'), $('gutterLeft'))).display === 'none');
+      sidebar.classList.remove('hidden');
+
+      state.settings = savedSettings; persistSettings();
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {

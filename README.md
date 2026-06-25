@@ -41,6 +41,21 @@ initials-style tag (`<!-- AB: ... -->`, `<!-- AB-FIX: ... -->`), so a file share
 between people shows everyone's comments; new comments you create use your configured
 prefix. The **?** button opens an in-app help page.
 
+**Find:** press **⌘F** to search the rendered document. Type to highlight every
+match (current match brighter); **⏎** jumps to the next, **⇧⏎** the previous, **Esc**
+closes. **⌘G** / **⇧⌘G** also step through matches.
+
+**Resizable panels:** drag the thin bars between the sidebar, document, and comment
+margin to resize them. The widths persist across sessions (localStorage).
+
+**Line wrapping:** if your `.md` files are hard-wrapped to a fixed column, mdviewer
+re-wraps any paragraph you edit back to that width when it saves, so the file on disk
+keeps its line-length constraint. The on-screen view always reflows prose to the
+window (Markdown joins soft-wrapped lines), so it adjusts as you resize. Set the width
+under **⚙ Settings → Line wrapping**: `auto` matches the file's existing wrap column,
+a number (e.g. `80`) forces it, `0` turns wrapping off. Only paragraphs are re-wrapped;
+code blocks, tables, lists, and headings are left byte-for-byte unchanged.
+
 **Sidebar:** the file tree has collapsible, lazily-loaded folders (click a folder to
 expand/collapse; children load on first open). Toggle the whole sidebar with the **☰**
 toolbar button or **⌘B** (View → Toggle Sidebar in the desktop app).
@@ -76,7 +91,7 @@ cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
 npm run dist           # build dist/mdviewer-<ver>-arm64.dmg
-npm run selftest       # run the 42-check self-test inside the Electron bundle
+npm run selftest       # run the 80-check self-test inside the Electron bundle
 ```
 
 Install: open the `.dmg`, drag **mdviewer** to Applications. First launch of an

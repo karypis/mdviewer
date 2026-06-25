@@ -194,6 +194,95 @@
     return { start: trimmed.length - m[0].length, end: trimmed.length };
   }
 
+  // ---- line-length re-wrapping (hard-wrap on save) ---------------------
+  // George's source files are hard-wrapped to a fixed column width. The viewer
+  // reflows them to the window on screen (markdown joins soft-wrapped lines),
+  // but when it WRITES a block back it must re-hard-wrap so the file on disk
+  // keeps its line-length constraint. We only ever re-wrap PARAGRAPH blocks
+  // (prose); code, tables, headings, lists, and blockquotes are left verbatim.
+
+  // True if a line carries an intentional markdown hard break (trailing two+
+  // spaces, or a backslash), which must be preserved, so we refuse to reflow.
+  function hasHardBreak(lines) {
+    for (var i = 0; i < lines.length; i++) {
+      if (/(?:[ \t]{2,}|\\)$/.test(lines[i])) return true;
+    }
+    return false;
+  }
+
+  // Reflow prose `text` to `width` columns by greedy word packing. HTML
+  // comments (<!-- GK: ... -->) are atomic tokens that are never split, even
+  // when they contain spaces, so a comment never gets broken across lines.
+  // Returns `text` unchanged when width<=0 or the text has hard breaks.
+  function wrapText(text, width) {
+    text = String(text == null ? '' : text);
+    if (!width || width <= 0) return text;
+    var lines = text.split('\n');
+    if (hasHardBreak(lines)) return text;
+    var joined = lines.join(' ');
+    var tokens = joined.match(/(?:<!--[\s\S]*?-->|\S)+/g);
+    if (!tokens) return text; // blank / whitespace only
+    var out = [];
+    var cur = '';
+    for (var i = 0; i < tokens.length; i++) {
+      var tok = tokens[i];
+      if (cur === '') cur = tok;
+      else if (cur.length + 1 + tok.length <= width) cur += ' ' + tok;
+      else { out.push(cur); cur = tok; }
+    }
+    if (cur !== '') out.push(cur);
+    return out.join('\n');
+  }
+
+  // Re-wrap a block's raw to `width`, preserving its exact trailing newlines so
+  // the surrounding block structure (blank-line separators) is untouched.
+  function wrapBlockRaw(raw, width) {
+    var trailer = raw.match(/\n*$/)[0];
+    var content = raw.slice(0, raw.length - trailer.length);
+    return wrapText(content, width) + trailer;
+  }
+
+  // Infer the file's hard-wrap column from its existing paragraphs. With greedy
+  // wrapping at a fixed width W, every non-final line of a multi-line paragraph
+  // has length <= W, and W < (that line + its next word), so the longest such
+  // line reproduces the file's wrapping exactly. Lines holding a comment are
+  // skipped (an unbreakable comment token can overrun W). Returns 0 if there is
+  // no multi-line prose to learn from.
+  function detectWrapWidth(source) {
+    var blocks = lexBlocks(source);
+    var max = 0;
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].type !== 'paragraph') continue;
+      var raw = blocks[i].raw;
+      var content = raw.slice(0, raw.length - raw.match(/\n*$/)[0].length);
+      var lines = content.split('\n');
+      if (lines.length < 2 || hasHardBreak(lines)) continue;
+      for (var k = 0; k < lines.length - 1; k++) {
+        if (lines[k].indexOf('<!--') !== -1) continue;
+        var len = lines[k].replace(/\s+$/, '').length;
+        if (len > max) max = len;
+      }
+    }
+    return max;
+  }
+
+  // Re-wrap the paragraph block that contains source offset `pos` to `width`,
+  // returning the new full source (unchanged if width<=0 or the block is not a
+  // paragraph). Used after a comment is spliced into prose so the host line
+  // does not exceed the constraint.
+  function rewrapAt(source, pos, width) {
+    if (!width || width <= 0) return source;
+    var blocks = lexBlocks(source);
+    if (!blocks.length) return source;
+    var i = blockIndexAt(blocks, pos);
+    if (i < 0) return source;
+    var b = blocks[i];
+    if (b.type !== 'paragraph') return source;
+    var nr = wrapBlockRaw(b.raw, width);
+    if (nr === b.raw) return source;
+    return spliceSource(source, b.start, b.end, nr);
+  }
+
   function locateInsertOffset(blockRaw, blockStart, prefix, selected) {
     if (!selected) return null;
     var cands = [];
@@ -239,5 +328,9 @@
     commentsByBlock: commentsByBlock,
     locateInsertOffset: locateInsertOffset,
     lastWordRange: lastWordRange,
+    wrapText: wrapText,
+    wrapBlockRaw: wrapBlockRaw,
+    detectWrapWidth: detectWrapWidth,
+    rewrapAt: rewrapAt,
   };
 });
