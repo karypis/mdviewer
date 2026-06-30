@@ -59,7 +59,25 @@
   <div id="modalBackdrop" class="hidden"></div>
 
   <div id="settings" class="modal hidden">
-    <h2>Comment style</h2>
+    <h2>Settings</h2>
+
+    <h3>Appearance</h3>
+    <label>Document font
+      <select id="setFont">
+        <option value="system">System (sans serif)</option>
+        <option value="sans">Helvetica / Arial</option>
+        <option value="serif">Georgia (serif)</option>
+        <option value="charter">Charter / New York (serif)</option>
+        <option value="mono">Monospace</option>
+      </select>
+    </label>
+    <label>Font size (px)
+      <input id="setSize" type="number" min="11" max="28" step="1">
+    </label>
+    <p class="hint">Sets the rendered document's font; headings, code, and tables
+      scale with it. The editor and comment cards are unaffected.</p>
+
+    <h3>Comments</h3>
     <label>Your initials (comment tag)
       <input id="setPrefix" maxlength="6" autocomplete="off" spellcheck="false">
     </label>
@@ -70,11 +88,12 @@
       <input id="setResponder" maxlength="16" autocomplete="off" spellcheck="false">
     </label>
     <p class="hint">When a comment is addressed, the reply tag is
-      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.</p>
-    <p class="hint">Comments from anyone using initials-style tags
+      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.
+      Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>
-    <h2 style="margin-top:18px">Line wrapping</h2>
+
+    <h3>Line wrapping</h3>
     <label>Hard-wrap width (columns when saving)
       <input id="setWrap" autocomplete="off" spellcheck="false" placeholder="auto">
     </label>
@@ -82,6 +101,7 @@
       a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
       off. Edited paragraphs are re-wrapped to this width on save; the on-screen
       view always reflows to the window.</p>
+
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>
       <button class="primary" id="setSave">Save</button>
@@ -116,6 +136,10 @@
         selection as <code>&lt;!-- GK: your note --&gt;</code> and shown as a card in
         the right margin, with that word highlighted. Click a card to edit or delete.
         <b>Clear Comments</b> removes them all at once.</p>
+      <h3>Appearance</h3>
+      <p>Open <b>⚙ Settings → Appearance</b> to change the document font (system,
+        serif, or monospace) and base font size. Headings, code, and tables scale
+        with it. The setting is remembered across sessions.</p>
       <h3>Customize the tag</h3>
       <p>Open <b>⚙ Settings</b> to set your own initials (e.g. <code>AB</code>) and the
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /

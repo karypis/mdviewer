@@ -23,6 +23,9 @@
   --gk-claude: #34a853;
   --sidebar-w: 240px;
   --margin-w: 300px;
+  /* document typography (overridable in Settings -> Appearance) */
+  --doc-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --doc-size: 15px;
 }
 
 html, body { height: 100%; }
@@ -117,7 +120,8 @@ body {
   max-width: none;
   margin: 0;
   padding: 32px 48px 50vh 48px;
-  font-size: 15px;
+  font-family: var(--doc-font);
+  font-size: var(--doc-size);
   line-height: 1.65;
 }
 #empty {
@@ -319,11 +323,11 @@ body {
 .modal h2 { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
 .modal h3 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 14px 0 4px; }
 .modal label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 12px; }
-.modal input {
+.modal input, .modal select {
   display: block; width: 100%; margin-top: 5px; background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 14px;
 }
-.modal input:focus { outline: none; border-color: var(--accent); }
+.modal input:focus, .modal select:focus { outline: none; border-color: var(--accent); }
 .modal .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
 .modal .hint code, .modal code {
   background: var(--surface2); padding: 1px 4px; border-radius: 3px;

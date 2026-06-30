@@ -283,35 +283,126 @@
     return spliceSource(source, b.start, b.end, nr);
   }
 
+  // Project markdown `raw` to the plain text a browser would render, returning
+  // { plain, map } where map[i] is the source index of plain character i. This
+  // lets us locate a DOM-selected (already-rendered) string inside the source
+  // even when the selection touches inline markup. We strip the inline syntax
+  // that produces no visible characters: emphasis/strong (* _), strikethrough
+  // (~), code-span backticks, link/image wrappers ([text](url), ![alt](url),
+  // [text][ref]), backslash escapes, and HTML comments. Everything else
+  // (including whitespace and newlines, which the DOM preserves in text nodes)
+  // is emitted verbatim. Block-level markers (#, -, >, |) are left in place;
+  // they only shift positions, which the map accounts for.
+  function projectPlain(raw) {
+    var plain = [];
+    var map = [];
+    var i = 0, n = raw.length;
+    function emit(ch, src) { plain.push(ch); map.push(src); }
+    while (i < n) {
+      if (raw.charAt(i) === '<' && raw.substr(i, 4) === '<!--') {
+        var ce = raw.indexOf('-->', i + 4);
+        i = ce === -1 ? n : ce + 3;
+        continue;
+      }
+      var c = raw.charAt(i);
+      if (c === '\\' && i + 1 < n) { emit(raw.charAt(i + 1), i + 1); i += 2; continue; }
+      if (c === '`') {
+        var j = i; while (j < n && raw.charAt(j) === '`') j++;
+        var ticks = raw.slice(i, j);
+        var close = raw.indexOf(ticks, j);
+        if (close === -1) { emit(c, i); i++; continue; }
+        for (var k = j; k < close; k++) emit(raw.charAt(k), k);
+        i = close + ticks.length;
+        continue;
+      }
+      if (c === '*' || c === '_' || c === '~') {
+        var p = i; while (p < n && raw.charAt(p) === c) p++;
+        i = p; continue;
+      }
+      if (c === '!' && raw.charAt(i + 1) === '[') { i++; continue; }
+      if (c === '[') {
+        var depth = 1, q = i + 1;
+        while (q < n && depth > 0) {
+          var qc = raw.charAt(q);
+          if (qc === '[') depth++;
+          else if (qc === ']') { depth--; if (depth === 0) break; }
+          q++;
+        }
+        if (q < n && raw.charAt(q) === ']') {
+          var sub = projectPlain(raw.slice(i + 1, q));
+          for (var s = 0; s < sub.plain.length; s++) emit(sub.plain.charAt(s), i + 1 + sub.map[s]);
+          var after = q + 1;
+          if (raw.charAt(after) === '(') {
+            var d2 = 1, r = after + 1;
+            while (r < n && d2 > 0) { var rc = raw.charAt(r); if (rc === '(') d2++; else if (rc === ')') d2--; r++; }
+            i = r;
+          } else if (raw.charAt(after) === '[') {
+            var r2 = raw.indexOf(']', after + 1);
+            i = r2 === -1 ? after : r2 + 1;
+          } else {
+            i = after;
+          }
+          continue;
+        }
+        emit(c, i); i++; continue;
+      }
+      emit(c, i); i++;
+    }
+    return { plain: plain.join(''), map: map };
+  }
+
   function locateInsertOffset(blockRaw, blockStart, prefix, selected) {
     if (!selected) return null;
-    var cands = [];
-    var from = 0, idx;
-    while ((idx = blockRaw.indexOf(selected, from)) !== -1) {
-      cands.push(idx);
-      from = idx + 1;
+    var proj = projectPlain(blockRaw);
+    var hay = proj.plain;
+
+    function find(needle) {
+      var out = [], from = 0, idx;
+      if (!needle) return out;
+      while ((idx = hay.indexOf(needle, from)) !== -1) { out.push(idx); from = idx + 1; }
+      return out;
     }
+
+    // Prefer the full selection; if rendering differences keep it from matching
+    // exactly, fall back to just its first word (the anchor we actually need).
+    var cands = find(selected);
+    var firstWord = (selected.match(/^\s*\S+/) || [''])[0];
+    if (cands.length === 0) cands = find(firstWord);
     if (cands.length === 0) return null;
-    if (cands.length === 1) return blockStart + cands[0] + firstWordLen(selected);
-    // The prefix is the rendered text up to the selection END, so it ends with
-    // the selection itself; strip that to get the text just BEFORE it.
-    var beforeSel = prefix || '';
-    if (beforeSel.slice(-selected.length) === selected) {
-      beforeSel = beforeSel.slice(0, beforeSel.length - selected.length);
-    }
-    var tail = beforeSel.slice(-32);
-    var best = cands[0], bestScore = -1;
-    for (var k = 0; k < cands.length; k++) {
-      var c = cands[k];
-      var before = blockRaw.slice(Math.max(0, c - tail.length), c);
-      var score = 0;
-      for (var j = 1; j <= Math.min(before.length, tail.length); j++) {
-        if (before.charAt(before.length - j) === tail.charAt(tail.length - j)) score++;
-        else break;
+
+    var chosen;
+    if (cands.length === 1) {
+      chosen = cands[0];
+    } else {
+      // Disambiguate using the rendered prefix (text from block start to the
+      // selection end), comparing the run just before each candidate.
+      var beforeSel = prefix || '';
+      if (selected && beforeSel.slice(-selected.length) === selected) {
+        beforeSel = beforeSel.slice(0, beforeSel.length - selected.length);
       }
-      if (score > bestScore) { bestScore = score; best = c; }
+      var tail = beforeSel.slice(-32);
+      var best = cands[0], bestScore = -1;
+      for (var ci = 0; ci < cands.length; ci++) {
+        var c0 = cands[ci];
+        var before = hay.slice(Math.max(0, c0 - tail.length), c0);
+        var score = 0;
+        for (var t = 1; t <= Math.min(before.length, tail.length); t++) {
+          if (before.charAt(before.length - t) === tail.charAt(tail.length - t)) score++;
+          else break;
+        }
+        if (score > bestScore) { bestScore = score; best = c0; }
+      }
+      chosen = best;
     }
-    return blockStart + best + firstWordLen(selected);
+
+    // Insert right after the first word of the selection. Map that plain offset
+    // back to a source offset via the projection map.
+    var endPlain = chosen + firstWordLen(selected);
+    if (endPlain > proj.map.length) endPlain = proj.map.length;
+    var srcOff = endPlain < proj.map.length
+      ? proj.map[endPlain]
+      : (proj.map.length ? proj.map[proj.map.length - 1] + 1 : 0);
+    return blockStart + srcOff;
   }
 
   return {
@@ -327,6 +418,7 @@
     variantClass: variantClass,
     commentsByBlock: commentsByBlock,
     locateInsertOffset: locateInsertOffset,
+    projectPlain: projectPlain,
     lastWordRange: lastWordRange,
     wrapText: wrapText,
     wrapBlockRaw: wrapBlockRaw,

@@ -39,6 +39,9 @@
   --gk-claude: #34a853;
   --sidebar-w: 240px;
   --margin-w: 300px;
+  /* document typography (overridable in Settings -> Appearance) */
+  --doc-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --doc-size: 15px;
 }
 
 html, body { height: 100%; }
@@ -133,7 +136,8 @@ body {
   max-width: none;
   margin: 0;
   padding: 32px 48px 50vh 48px;
-  font-size: 15px;
+  font-family: var(--doc-font);
+  font-size: var(--doc-size);
   line-height: 1.65;
 }
 #empty {
@@ -335,11 +339,11 @@ body {
 .modal h2 { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
 .modal h3 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 14px 0 4px; }
 .modal label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 12px; }
-.modal input {
+.modal input, .modal select {
   display: block; width: 100%; margin-top: 5px; background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 14px;
 }
-.modal input:focus { outline: none; border-color: var(--accent); }
+.modal input:focus, .modal select:focus { outline: none; border-color: var(--accent); }
 .modal .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
 .modal .hint code, .modal code {
   background: var(--surface2); padding: 1px 4px; border-radius: 3px;
@@ -475,7 +479,25 @@ body {
   <div id="modalBackdrop" class="hidden"></div>
 
   <div id="settings" class="modal hidden">
-    <h2>Comment style</h2>
+    <h2>Settings</h2>
+
+    <h3>Appearance</h3>
+    <label>Document font
+      <select id="setFont">
+        <option value="system">System (sans serif)</option>
+        <option value="sans">Helvetica / Arial</option>
+        <option value="serif">Georgia (serif)</option>
+        <option value="charter">Charter / New York (serif)</option>
+        <option value="mono">Monospace</option>
+      </select>
+    </label>
+    <label>Font size (px)
+      <input id="setSize" type="number" min="11" max="28" step="1">
+    </label>
+    <p class="hint">Sets the rendered document's font; headings, code, and tables
+      scale with it. The editor and comment cards are unaffected.</p>
+
+    <h3>Comments</h3>
     <label>Your initials (comment tag)
       <input id="setPrefix" maxlength="6" autocomplete="off" spellcheck="false">
     </label>
@@ -486,11 +508,12 @@ body {
       <input id="setResponder" maxlength="16" autocomplete="off" spellcheck="false">
     </label>
     <p class="hint">When a comment is addressed, the reply tag is
-      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.</p>
-    <p class="hint">Comments from anyone using initials-style tags
+      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.
+      Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>
-    <h2 style="margin-top:18px">Line wrapping</h2>
+
+    <h3>Line wrapping</h3>
     <label>Hard-wrap width (columns when saving)
       <input id="setWrap" autocomplete="off" spellcheck="false" placeholder="auto">
     </label>
@@ -498,6 +521,7 @@ body {
       a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
       off. Edited paragraphs are re-wrapped to this width on save; the on-screen
       view always reflows to the window.</p>
+
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>
       <button class="primary" id="setSave">Save</button>
@@ -532,6 +556,10 @@ body {
         selection as <code>&lt;!-- GK: your note --&gt;</code> and shown as a card in
         the right margin, with that word highlighted. Click a card to edit or delete.
         <b>Clear Comments</b> removes them all at once.</p>
+      <h3>Appearance</h3>
+      <p>Open <b>⚙ Settings → Appearance</b> to change the document font (system,
+        serif, or monospace) and base font size. Headings, code, and tables scale
+        with it. The setting is remembered across sessions.</p>
       <h3>Customize the tag</h3>
       <p>Open <b>⚙ Settings</b> to set your own initials (e.g. <code>AB</code>) and the
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /
@@ -2059,35 +2087,126 @@ return He}()
     return spliceSource(source, b.start, b.end, nr);
   }
 
+  // Project markdown `raw` to the plain text a browser would render, returning
+  // { plain, map } where map[i] is the source index of plain character i. This
+  // lets us locate a DOM-selected (already-rendered) string inside the source
+  // even when the selection touches inline markup. We strip the inline syntax
+  // that produces no visible characters: emphasis/strong (* _), strikethrough
+  // (~), code-span backticks, link/image wrappers ([text](url), ![alt](url),
+  // [text][ref]), backslash escapes, and HTML comments. Everything else
+  // (including whitespace and newlines, which the DOM preserves in text nodes)
+  // is emitted verbatim. Block-level markers (#, -, >, |) are left in place;
+  // they only shift positions, which the map accounts for.
+  function projectPlain(raw) {
+    var plain = [];
+    var map = [];
+    var i = 0, n = raw.length;
+    function emit(ch, src) { plain.push(ch); map.push(src); }
+    while (i < n) {
+      if (raw.charAt(i) === '<' && raw.substr(i, 4) === '<!--') {
+        var ce = raw.indexOf('-->', i + 4);
+        i = ce === -1 ? n : ce + 3;
+        continue;
+      }
+      var c = raw.charAt(i);
+      if (c === '\\' && i + 1 < n) { emit(raw.charAt(i + 1), i + 1); i += 2; continue; }
+      if (c === '`') {
+        var j = i; while (j < n && raw.charAt(j) === '`') j++;
+        var ticks = raw.slice(i, j);
+        var close = raw.indexOf(ticks, j);
+        if (close === -1) { emit(c, i); i++; continue; }
+        for (var k = j; k < close; k++) emit(raw.charAt(k), k);
+        i = close + ticks.length;
+        continue;
+      }
+      if (c === '*' || c === '_' || c === '~') {
+        var p = i; while (p < n && raw.charAt(p) === c) p++;
+        i = p; continue;
+      }
+      if (c === '!' && raw.charAt(i + 1) === '[') { i++; continue; }
+      if (c === '[') {
+        var depth = 1, q = i + 1;
+        while (q < n && depth > 0) {
+          var qc = raw.charAt(q);
+          if (qc === '[') depth++;
+          else if (qc === ']') { depth--; if (depth === 0) break; }
+          q++;
+        }
+        if (q < n && raw.charAt(q) === ']') {
+          var sub = projectPlain(raw.slice(i + 1, q));
+          for (var s = 0; s < sub.plain.length; s++) emit(sub.plain.charAt(s), i + 1 + sub.map[s]);
+          var after = q + 1;
+          if (raw.charAt(after) === '(') {
+            var d2 = 1, r = after + 1;
+            while (r < n && d2 > 0) { var rc = raw.charAt(r); if (rc === '(') d2++; else if (rc === ')') d2--; r++; }
+            i = r;
+          } else if (raw.charAt(after) === '[') {
+            var r2 = raw.indexOf(']', after + 1);
+            i = r2 === -1 ? after : r2 + 1;
+          } else {
+            i = after;
+          }
+          continue;
+        }
+        emit(c, i); i++; continue;
+      }
+      emit(c, i); i++;
+    }
+    return { plain: plain.join(''), map: map };
+  }
+
   function locateInsertOffset(blockRaw, blockStart, prefix, selected) {
     if (!selected) return null;
-    var cands = [];
-    var from = 0, idx;
-    while ((idx = blockRaw.indexOf(selected, from)) !== -1) {
-      cands.push(idx);
-      from = idx + 1;
+    var proj = projectPlain(blockRaw);
+    var hay = proj.plain;
+
+    function find(needle) {
+      var out = [], from = 0, idx;
+      if (!needle) return out;
+      while ((idx = hay.indexOf(needle, from)) !== -1) { out.push(idx); from = idx + 1; }
+      return out;
     }
+
+    // Prefer the full selection; if rendering differences keep it from matching
+    // exactly, fall back to just its first word (the anchor we actually need).
+    var cands = find(selected);
+    var firstWord = (selected.match(/^\s*\S+/) || [''])[0];
+    if (cands.length === 0) cands = find(firstWord);
     if (cands.length === 0) return null;
-    if (cands.length === 1) return blockStart + cands[0] + firstWordLen(selected);
-    // The prefix is the rendered text up to the selection END, so it ends with
-    // the selection itself; strip that to get the text just BEFORE it.
-    var beforeSel = prefix || '';
-    if (beforeSel.slice(-selected.length) === selected) {
-      beforeSel = beforeSel.slice(0, beforeSel.length - selected.length);
-    }
-    var tail = beforeSel.slice(-32);
-    var best = cands[0], bestScore = -1;
-    for (var k = 0; k < cands.length; k++) {
-      var c = cands[k];
-      var before = blockRaw.slice(Math.max(0, c - tail.length), c);
-      var score = 0;
-      for (var j = 1; j <= Math.min(before.length, tail.length); j++) {
-        if (before.charAt(before.length - j) === tail.charAt(tail.length - j)) score++;
-        else break;
+
+    var chosen;
+    if (cands.length === 1) {
+      chosen = cands[0];
+    } else {
+      // Disambiguate using the rendered prefix (text from block start to the
+      // selection end), comparing the run just before each candidate.
+      var beforeSel = prefix || '';
+      if (selected && beforeSel.slice(-selected.length) === selected) {
+        beforeSel = beforeSel.slice(0, beforeSel.length - selected.length);
       }
-      if (score > bestScore) { bestScore = score; best = c; }
+      var tail = beforeSel.slice(-32);
+      var best = cands[0], bestScore = -1;
+      for (var ci = 0; ci < cands.length; ci++) {
+        var c0 = cands[ci];
+        var before = hay.slice(Math.max(0, c0 - tail.length), c0);
+        var score = 0;
+        for (var t = 1; t <= Math.min(before.length, tail.length); t++) {
+          if (before.charAt(before.length - t) === tail.charAt(tail.length - t)) score++;
+          else break;
+        }
+        if (score > bestScore) { bestScore = score; best = c0; }
+      }
+      chosen = best;
     }
-    return blockStart + best + firstWordLen(selected);
+
+    // Insert right after the first word of the selection. Map that plain offset
+    // back to a source offset via the projection map.
+    var endPlain = chosen + firstWordLen(selected);
+    if (endPlain > proj.map.length) endPlain = proj.map.length;
+    var srcOff = endPlain < proj.map.length
+      ? proj.map[endPlain]
+      : (proj.map.length ? proj.map[proj.map.length - 1] + 1 : 0);
+    return blockStart + srcOff;
   }
 
   return {
@@ -2103,6 +2222,7 @@ return He}()
     variantClass: variantClass,
     commentsByBlock: commentsByBlock,
     locateInsertOffset: locateInsertOffset,
+    projectPlain: projectPlain,
     lastWordRange: lastWordRange,
     wrapText: wrapText,
     wrapBlockRaw: wrapBlockRaw,
@@ -2120,13 +2240,21 @@ return He}()
   var docEl, docwrap, marginEl, sidebar, composer, commentBtn, toastEl;
 
   var KINDS = ['', '-FIX', '-Q', '-NIT']; // suffixes appended to the prefix
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' };
+  // Named document-font stacks offered in Settings -> Appearance.
+  var FONTS = {
+    system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+    sans: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    serif: "Georgia, 'Times New Roman', Times, serif",
+    charter: "'Charter', 'New York', 'Iowan Old Style', Palatino, Georgia, serif",
+    mono: "'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+  };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 };
 
   var state = {
     fileHandle: null,
     dirHandle: null,
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' }, // comment style + wrap
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
     detectedWidth: 0,     // hard-wrap column inferred from the loaded file
     source: '',
     blocks: [],
@@ -2737,6 +2865,8 @@ return He}()
         if (s.prefix) state.settings.prefix = s.prefix;
         if (s.responder) state.settings.responder = s.responder;
         if (s.wrap != null) state.settings.wrap = s.wrap;
+        if (s.font && FONTS[s.font]) state.settings.font = s.font;
+        if (s.size != null) state.settings.size = cleanSize(s.size);
       }
     } catch (e) { /* defaults */ }
   }
@@ -2755,6 +2885,20 @@ return He}()
     if (!isFinite(n) || n < 0) return 'auto';
     return String(Math.min(n, 400));
   }
+  // Document font size in px, clamped to a sane range.
+  function cleanSize(s) {
+    var n = parseInt(s, 10);
+    if (!isFinite(n)) return DEFAULT_SETTINGS.size;
+    return Math.max(11, Math.min(n, 28));
+  }
+  // Push the appearance settings into CSS custom properties on :root. The
+  // document reads --doc-font / --doc-size; headings, code, and tables are em-
+  // scaled so they follow the base size.
+  function applyAppearance() {
+    var root = document.documentElement;
+    root.style.setProperty('--doc-font', FONTS[state.settings.font] || FONTS.system);
+    root.style.setProperty('--doc-size', cleanSize(state.settings.size) + 'px');
+  }
 
   // Build the composer's variant dropdown from the configured prefix.
   function populateVariants() {
@@ -2769,13 +2913,15 @@ return He}()
   }
 
   function openSettings() {
+    $('setFont').value = FONTS[state.settings.font] ? state.settings.font : 'system';
+    $('setSize').value = cleanSize(state.settings.size);
     $('setPrefix').value = state.settings.prefix;
     $('setResponder').value = state.settings.responder;
     $('setWrap').value = state.settings.wrap === 'auto' ? '' : state.settings.wrap;
     $('prefixPreview').textContent = state.settings.prefix;
     $('respPreview').textContent = state.settings.responder;
     showModal('settings');
-    $('setPrefix').focus();
+    $('setFont').focus();
   }
   function saveSettings() {
     var prefix = cleanPrefix($('setPrefix').value) || DEFAULT_SETTINGS.prefix;
@@ -2783,7 +2929,10 @@ return He}()
     state.settings.prefix = prefix;
     state.settings.responder = responder;
     state.settings.wrap = cleanWrap($('setWrap').value);
+    state.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
+    state.settings.size = cleanSize($('setSize').value);
     persistSettings();
+    applyAppearance();
     populateVariants();
     closeModal();
     if (state.source) { relex(); renderAll(); } // re-split audit trails, recolor
@@ -3098,6 +3247,7 @@ return He}()
     toastEl = $('toast');
 
     loadSettings();
+    applyAppearance();
     populateVariants();
 
     $('openFile').addEventListener('click', openFile);
@@ -3189,6 +3339,7 @@ return He}()
         closeModal: closeModal, populateVariants: populateVariants,
         openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
         searchStep: searchStep, effectiveWrap: effectiveWrap,
+        applyAppearance: applyAppearance, FONTS: FONTS,
       };
     }
     if (location.search.indexOf('selftest') !== -1) setTimeout(runSelfTest, 50);
@@ -3430,7 +3581,7 @@ return He}()
       state.dirHandle = null;
 
       // --- customizable comment style + help ----------------------------
-      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap };
+      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap, font: state.settings.font, size: state.settings.size };
       populateVariants();
       var optVals = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants from prefix (GK default)',
@@ -3536,7 +3687,29 @@ return He}()
         getComputedStyle((sidebar.classList.add('hidden'), $('gutterLeft'))).display === 'none');
       sidebar.classList.remove('hidden');
 
-      state.settings = savedSettings; persistSettings();
+      // --- appearance: document font + size ------------------------------
+      openSettings();
+      $('setFont').value = 'serif';
+      $('setSize').value = '20';
+      saveSettings();
+      var rootStyle = getComputedStyle(document.documentElement);
+      check('font setting applied to --doc-font',
+        rootStyle.getPropertyValue('--doc-font').indexOf('Georgia') !== -1);
+      check('font size applied to --doc-size',
+        rootStyle.getPropertyValue('--doc-size').trim() === '20px');
+      check('document picks up the font size',
+        Math.round(parseFloat(getComputedStyle(docEl).fontSize)) === 20);
+      check('appearance persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.settings')).font === 'serif');
+      // out-of-range size is clamped
+      openSettings(); $('setSize').value = '400'; saveSettings();
+      check('oversized font size clamped to 28', state.settings.size === 28);
+      // unknown font falls back to system
+      state.settings.font = 'bogus'; applyAppearance();
+      check('unknown font falls back to system',
+        getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
+
+      state.settings = savedSettings; persistSettings(); applyAppearance();
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {

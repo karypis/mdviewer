@@ -7,13 +7,21 @@
   var docEl, docwrap, marginEl, sidebar, composer, commentBtn, toastEl;
 
   var KINDS = ['', '-FIX', '-Q', '-NIT']; // suffixes appended to the prefix
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' };
+  // Named document-font stacks offered in Settings -> Appearance.
+  var FONTS = {
+    system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+    sans: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    serif: "Georgia, 'Times New Roman', Times, serif",
+    charter: "'Charter', 'New York', 'Iowan Old Style', Palatino, Georgia, serif",
+    mono: "'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+  };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 };
 
   var state = {
     fileHandle: null,
     dirHandle: null,
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto' }, // comment style + wrap
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
     detectedWidth: 0,     // hard-wrap column inferred from the loaded file
     source: '',
     blocks: [],
@@ -624,6 +632,8 @@
         if (s.prefix) state.settings.prefix = s.prefix;
         if (s.responder) state.settings.responder = s.responder;
         if (s.wrap != null) state.settings.wrap = s.wrap;
+        if (s.font && FONTS[s.font]) state.settings.font = s.font;
+        if (s.size != null) state.settings.size = cleanSize(s.size);
       }
     } catch (e) { /* defaults */ }
   }
@@ -642,6 +652,20 @@
     if (!isFinite(n) || n < 0) return 'auto';
     return String(Math.min(n, 400));
   }
+  // Document font size in px, clamped to a sane range.
+  function cleanSize(s) {
+    var n = parseInt(s, 10);
+    if (!isFinite(n)) return DEFAULT_SETTINGS.size;
+    return Math.max(11, Math.min(n, 28));
+  }
+  // Push the appearance settings into CSS custom properties on :root. The
+  // document reads --doc-font / --doc-size; headings, code, and tables are em-
+  // scaled so they follow the base size.
+  function applyAppearance() {
+    var root = document.documentElement;
+    root.style.setProperty('--doc-font', FONTS[state.settings.font] || FONTS.system);
+    root.style.setProperty('--doc-size', cleanSize(state.settings.size) + 'px');
+  }
 
   // Build the composer's variant dropdown from the configured prefix.
   function populateVariants() {
@@ -656,13 +680,15 @@
   }
 
   function openSettings() {
+    $('setFont').value = FONTS[state.settings.font] ? state.settings.font : 'system';
+    $('setSize').value = cleanSize(state.settings.size);
     $('setPrefix').value = state.settings.prefix;
     $('setResponder').value = state.settings.responder;
     $('setWrap').value = state.settings.wrap === 'auto' ? '' : state.settings.wrap;
     $('prefixPreview').textContent = state.settings.prefix;
     $('respPreview').textContent = state.settings.responder;
     showModal('settings');
-    $('setPrefix').focus();
+    $('setFont').focus();
   }
   function saveSettings() {
     var prefix = cleanPrefix($('setPrefix').value) || DEFAULT_SETTINGS.prefix;
@@ -670,7 +696,10 @@
     state.settings.prefix = prefix;
     state.settings.responder = responder;
     state.settings.wrap = cleanWrap($('setWrap').value);
+    state.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
+    state.settings.size = cleanSize($('setSize').value);
     persistSettings();
+    applyAppearance();
     populateVariants();
     closeModal();
     if (state.source) { relex(); renderAll(); } // re-split audit trails, recolor
@@ -985,6 +1014,7 @@
     toastEl = $('toast');
 
     loadSettings();
+    applyAppearance();
     populateVariants();
 
     $('openFile').addEventListener('click', openFile);
@@ -1076,6 +1106,7 @@
         closeModal: closeModal, populateVariants: populateVariants,
         openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
         searchStep: searchStep, effectiveWrap: effectiveWrap,
+        applyAppearance: applyAppearance, FONTS: FONTS,
       };
     }
     if (location.search.indexOf('selftest') !== -1) setTimeout(runSelfTest, 50);
@@ -1317,7 +1348,7 @@
       state.dirHandle = null;
 
       // --- customizable comment style + help ----------------------------
-      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap };
+      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap, font: state.settings.font, size: state.settings.size };
       populateVariants();
       var optVals = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants from prefix (GK default)',
@@ -1423,7 +1454,29 @@
         getComputedStyle((sidebar.classList.add('hidden'), $('gutterLeft'))).display === 'none');
       sidebar.classList.remove('hidden');
 
-      state.settings = savedSettings; persistSettings();
+      // --- appearance: document font + size ------------------------------
+      openSettings();
+      $('setFont').value = 'serif';
+      $('setSize').value = '20';
+      saveSettings();
+      var rootStyle = getComputedStyle(document.documentElement);
+      check('font setting applied to --doc-font',
+        rootStyle.getPropertyValue('--doc-font').indexOf('Georgia') !== -1);
+      check('font size applied to --doc-size',
+        rootStyle.getPropertyValue('--doc-size').trim() === '20px');
+      check('document picks up the font size',
+        Math.round(parseFloat(getComputedStyle(docEl).fontSize)) === 20);
+      check('appearance persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.settings')).font === 'serif');
+      // out-of-range size is clamped
+      openSettings(); $('setSize').value = '400'; saveSettings();
+      check('oversized font size clamped to 28', state.settings.size === 28);
+      // unknown font falls back to system
+      state.settings.font = 'bogus'; applyAppearance();
+      check('unknown font falls back to system',
+        getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
+
+      state.settings = savedSettings; persistSettings(); applyAppearance();
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {

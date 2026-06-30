@@ -41,6 +41,11 @@ initials-style tag (`<!-- AB: ... -->`, `<!-- AB-FIX: ... -->`), so a file share
 between people shows everyone's comments; new comments you create use your configured
 prefix. The **?** button opens an in-app help page.
 
+**Appearance (⚙):** **⚙ Settings → Appearance** sets the document font (system,
+Helvetica, Georgia, Charter/New York, or monospace) and base font size; headings,
+code, and tables scale with it. The choice persists across sessions and does not
+touch the editor or comment cards.
+
 **Find:** press **⌘F** to search the rendered document. Type to highlight every
 match (current match brighter); **⏎** jumps to the next, **⇧⏎** the previous, **Esc**
 closes. **⌘G** / **⇧⌘G** also step through matches.
@@ -91,7 +96,7 @@ cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
 npm run dist           # build dist/mdviewer-<ver>-arm64.dmg
-npm run selftest       # run the 80-check self-test inside the Electron bundle
+npm run selftest       # run the 86-check self-test inside the Electron bundle
 ```
 
 Install: open the `.dmg`, drag **mdviewer** to Applications. First launch of an
