@@ -1,152 +1,339 @@
 # mdviewer
 
-A local, single-file Markdown viewer / inline editor / commenter. Open a `.md` file,
-read it rendered, click any block to edit it, and select text to attach comments that
-are saved into the file as `<!-- GK: ... -->` HTML comments.
+A local, single-file Markdown viewer, inline editor, and commenter. Open a `.md`
+file, read it rendered, click any block to edit it, and select text to attach
+comments that are saved into the file as `<!-- GK: ... -->` HTML comments.
 
-Built per `spec.md`. Runs in Chromium browsers (Chrome, Edge, Brave) — it uses the
-File System Access API for direct, autosaving disk access.
+Everything runs offline. There is no server, no account, and no cloud copy: the
+app reads and writes your original file on disk. Built per `spec.md`. It works in
+Chromium browsers (Chrome, Edge, Brave) and in the bundled macOS desktop app,
+because it uses the File System Access API for direct, autosaving disk access.
 
-## Use it
+## Quick start
 
-1. Open **`mdviewer.html`** in Chrome/Edge/Brave (double-click, or drag into a tab). No
-   install, no build, no server.
-2. Click **Open File** (or **Open Folder** for a file tree) and pick a Markdown file.
-   Grant read/write permission when prompted. The picker starts in the last folder
-   you opened (persisted across sessions), so open `~/agents` once with **Open
-   Folder** and every subsequent picker starts there. (Browsers do not allow an app
-   to hardcode an absolute path, so this one-time pick is required.)
-3. **Read** it rendered (GitHub Flavored Markdown + syntax-highlighted code).
-4. **Edit**: click any block (paragraph, heading, list, table, code…). It turns into a
-   raw-Markdown editor. `⌘↵` or click away to save; `Esc` to cancel. Only that block
-   changes; everything else stays byte-for-byte identical. Changes autosave to disk.
-5. **Comment**: select text, click the **＋ Comment** bubble, pick a tag (`GK` / `GK-FIX`
-   / `GK-Q` / `GK-NIT`), and type. The comment is written into the source right after
-   the **first word** of your selection as `<!-- GK: your text -->` and shown as a
-   card in the right margin, aligned to that anchor.
-6. **Existing comments**: any file already containing `<!-- GK: ... -->` (and the
-   variants, plus the audit-trail form `<!-- GK: ... / CLAUDE: ... -->`) renders
-   those as margin cards automatically. Click a card to edit or delete it.
-7. **Clear all**: the **Clear Comments** toolbar button (appears when a file has
-   comments) removes every `<!-- GK: ... -->` from the file in one step, after a
-   confirmation. Non-GK HTML comments are left untouched.
+**In a browser.** Double-click `mdviewer.html`, or drag it into a Chrome tab. No
+install, no build, no server. Click **Open File**, pick a Markdown file, and grant
+read/write permission when the browser asks.
 
-The save indicator in the toolbar shows `Saved` / `Saving…` / `Unsaved`. The app also
-offers **Reopen last** on launch (it remembers your last file/folder).
+**As a macOS app.** Build it once (see [Desktop app](#desktop-app-macos)), drag
+`mdviewer` to Applications, then double-click any `.md` file.
 
-**Customize the tag (⚙):** the comment tag defaults to `GK` (with `-FIX` / `-Q` /
-`-NIT` kinds) and a `CLAUDE` audit-trail responder, but **⚙ Settings** lets anyone set
-their own initials and responder (persisted locally). The viewer renders *any*
-initials-style tag (`<!-- AB: ... -->`, `<!-- AB-FIX: ... -->`), so a file shared
-between people shows everyone's comments; new comments you create use your configured
-prefix. The **?** button opens an in-app help page.
+Try `samples/demo.md`. It ships with example comments already in it.
 
-**Appearance (⚙):** **⚙ Settings → Appearance** sets the document font (system,
-Helvetica, Georgia, Charter/New York, or monospace) and base font size; headings,
-code, and tables scale with it. The choice persists across sessions and does not
-touch the editor or comment cards.
+---
 
-**Find:** press **⌘F** to search the rendered document. Type to highlight every
-match (current match brighter); **⏎** jumps to the next, **⇧⏎** the previous, **Esc**
-closes. **⌘G** / **⇧⌘G** also step through matches.
+# Manual
 
-**Resizable panels:** drag the thin bars between the sidebar, document, and comment
-margin to resize them. The widths persist across sessions (localStorage).
+## 1. The window
 
-**Line wrapping:** if your `.md` files are hard-wrapped to a fixed column, mdviewer
-re-wraps any paragraph you edit back to that width when it saves, so the file on disk
-keeps its line-length constraint. The on-screen view always reflows prose to the
-window (Markdown joins soft-wrapped lines), so it adjusts as you resize. Set the width
-under **⚙ Settings → Line wrapping**: `auto` matches the file's existing wrap column,
-a number (e.g. `80`) forces it, `0` turns wrapping off. Only paragraphs are re-wrapped;
-code blocks, tables, lists, and headings are left byte-for-byte unchanged.
+Three vertical panels sit under a toolbar:
 
-**Sidebar:** the file tree has collapsible, lazily-loaded folders (click a folder to
-expand/collapse; children load on first open). Toggle the whole sidebar with the **☰**
-toolbar button or **⌘B** (View → Toggle Sidebar in the desktop app).
+| Panel | Contents |
+|---|---|
+| **Sidebar** (left) | The document outline, or a file tree when you open a folder |
+| **Document** (center) | The rendered Markdown. Click a block to edit it |
+| **Margin** (right) | One card per comment, aligned to the text it annotates |
 
-**Export PDF:** the **PDF** toolbar button exports the document you're viewing as a
-clean, light, chrome-free PDF (no toolbar/sidebar/comment-margin; GK comments are
-omitted). In the desktop app this writes a real file via a save dialog (also File →
-Export as PDF, **⌘P**); in the browser it opens the print dialog where you choose "Save
-as PDF".
+Drag the thin bar between any two panels to resize them. The sidebar clamps to
+140-560 px and the comment margin to 180-680 px; the document takes the rest and
+its prose reflows to whatever width is left. Both widths persist across sessions
+in `localStorage` under the key `mdviewer.layout`.
+
+Hide the sidebar entirely with the **☰** toolbar button or **⌘B**.
+
+The toolbar's right end shows the save indicator: **Saved**, **Saving…**,
+**Unsaved**, or **Save error**.
+
+## 2. Opening files
+
+**Open File** picks a single Markdown file. **Open Folder** opens a folder as a
+collapsible file tree in the sidebar; folders load their children the first time
+you expand them, so a deep tree costs nothing until you click into it.
+
+The picker starts in the last folder you opened, remembered across sessions. Open
+`~/agents` once with **Open Folder** and every later picker starts there. Browsers
+do not let a web app hardcode an absolute path, so this one-time pick is required.
+
+On launch the app offers **Reopen last**, which restores your previous file or
+folder from the handle it stored in IndexedDB. The browser may re-prompt for
+permission.
+
+In the desktop app you can also double-click a `.md` file in Finder, or use
+right-click → **Open With** → mdviewer. Files opened this way read and write
+through a native bridge in the Electron main process, so autosave writes straight
+to the original path with no permission prompt.
+
+## 3. Reading
+
+Documents render as GitHub Flavored Markdown with syntax-highlighted code blocks.
+
+In single-file mode the sidebar shows the document **outline**: every heading,
+indented by level. Click a heading to scroll to it.
+
+Links behave differently from a normal page, because a plain click is how you
+enter the editor. **Click** a link to edit the block that contains it.
+**⌘-click** (Ctrl-click on Windows and Linux) to open the link in a new tab.
+
+## 4. Finding text
+
+Press **⌘F** to open the find bar. If you have text selected when you press it,
+that text seeds the query.
+
+Typing highlights every match at once, with the current one brighter than the
+rest, and the counter reads `3 of 17`. Matching is a case-insensitive plain
+substring search, not a regular expression, and it stops after 5000 matches.
+
+- **⏎** jumps to the next match, **⇧⏎** to the previous. Both wrap around.
+- **⌘G** and **⇧⌘G** do the same without focusing the find bar.
+- **Esc** closes the bar and clears the highlights.
+
+Highlights are rebuilt whenever the document re-renders, so they survive an edit
+made while the bar is open.
+
+## 5. Editing a block
+
+Click any block (paragraph, heading, list, table, code fence, blockquote) and it
+becomes a textarea holding that block's raw Markdown.
+
+- **⌘↵**, or clicking away, saves.
+- **Esc** cancels and discards your changes.
+- **Tab** inserts two spaces instead of moving focus.
+
+Only the bytes of the block you touched change. Every other byte in the file,
+including whitespace and comments, stays exactly as it was. Saving a paragraph
+also re-hard-wraps it (see [Line wrapping](#7-line-wrapping)). The change
+autosaves to disk.
+
+## 6. Commenting
+
+**Add a comment.** Select text inside one block, click the **＋ Comment** bubble
+that appears next to the selection, pick a tag from the dropdown, type your note,
+and press **⌘↵** or click **Save**. Submitting an empty note cancels instead.
+
+The comment is written into the source immediately after the **first word** of
+your selection:
+
+```
+The algorithm computes<!-- GK-Q: which one? --> an initial partition.
+```
+
+That first word is what the margin card anchors to and what the app highlights.
+A selection that spans two blocks is ignored, and so is a selection that starts
+in a block and ends outside it.
+
+Selections that cross inline markup work correctly. Selecting the rendered text
+`reverse converter` inside `**reverse converter**` places the comment after
+`**reverse`, not at the end of the paragraph.
+
+**Kinds.** The dropdown offers four tags. The suffix picks the card's color:
+
+| Tag | Meaning | Card color |
+|---|---|---|
+| `GK` | A plain note | Blue |
+| `GK-FIX` | Something to fix | Amber |
+| `GK-Q` | A question | Purple |
+| `GK-NIT` | A nitpick | Gray |
+
+**Work with existing comments.** Any file that already contains
+`<!-- GK: ... -->` renders those as margin cards on open. Click a card to scroll
+to and highlight its anchor word. Each card carries **edit** and **delete**
+links. The **Clear Comments** toolbar button, which appears only when the file
+has comments, removes every one of them in a single step after a confirmation.
+HTML comments that are not review comments, such as `<!-- prettier-ignore -->`,
+are never touched.
+
+**Audit trail.** A comment can carry a response, separated by a slash:
+
+```
+<!-- GK-FIX: this should be O(n log n) / CLAUDE: fixed in c3a91f0 -->
+```
+
+The card shows the response as a green reply block below your note. `CLAUDE` is
+the default responder name and is configurable.
+
+**Sharing a file.** The renderer accepts *any* initials-style tag, so
+`<!-- AB: ... -->` and `<!-- AB-FIX: ... -->` show up as cards alongside yours,
+and the kind suffix colors them the same way regardless of whose initials they
+carry. New comments that *you* create always use the prefix you configured.
+
+## 7. Line wrapping
+
+Many Markdown files are hard-wrapped to a fixed column. mdviewer preserves that
+constraint without letting it dictate how the text looks on screen.
+
+**On screen** the document always reflows prose to the width of the window, so
+resizing the window or dragging a panel gutter re-flows the paragraphs. This is
+just standard Markdown: soft-wrapped lines join into one paragraph.
+
+**On disk** every paragraph you edit, and every paragraph you drop a comment
+into, is re-wrapped back to the file's column width before it is saved.
+
+Set the width under **⚙ Settings → Line wrapping**:
+
+- `auto` (the default) infers the column from the file itself, by taking the
+  longest non-final line of any multi-line paragraph. Under greedy wrapping that
+  line reproduces the file's existing wrapping exactly, so re-saving an untouched
+  paragraph is a no-op.
+- A number, such as `80`, forces that column.
+- `0` turns re-wrapping off and leaves your line breaks alone.
+
+Only paragraphs are re-wrapped. Code blocks, tables, lists, headings, and
+blockquotes are left byte-for-byte unchanged. A paragraph containing a Markdown
+hard break (two trailing spaces or a trailing backslash) is never reflowed,
+because reflowing it would change how it renders.
+
+## 8. Saving
+
+Saving is automatic. A block edit saves 500 ms after you commit it; adding,
+editing, or deleting a comment saves immediately. **⌘S** forces a save now.
+
+Watch the toolbar indicator to know where you stand:
+
+| State | Meaning |
+|---|---|
+| **Saved** | The file on disk matches what you see |
+| **Saving…** | A write is in flight |
+| **Unsaved** | An edit is queued and not yet written |
+| **Save error** | The write failed. The reason appears in a toast |
+
+## 9. Exporting a PDF
+
+The **PDF** toolbar button exports the document you are viewing as a clean, light,
+chrome-free PDF: no toolbar, no sidebar, no comment margin, and no review
+comments. In the desktop app it writes a real file through a save dialog (also
+**File → Export as PDF**, or **⌘P**). In the browser it opens the print dialog,
+where you choose "Save as PDF".
+
+## 10. Settings
+
+Click **⚙** in the toolbar. Settings persist in `localStorage` under
+`mdviewer.settings` and apply to every file you open.
+
+| Setting | Values | Default | Effect |
+|---|---|---|---|
+| Document font | System, Helvetica/Arial, Georgia, Charter/New York, Monospace | System | Font of the rendered document |
+| Font size | 11 to 28 px | 15 | Base size. Headings, code, and tables scale with it |
+| Your initials | 1 to 6 letters or digits, uppercased | `GK` | The tag on comments you create |
+| Audit-trail responder | 1 to 16 letters, digits, or hyphens, uppercased | `CLAUDE` | The name that splits a comment from its response |
+| Hard-wrap width | `auto`, a number, or `0` | `auto` | Column that edited paragraphs are wrapped to on save |
+
+The font and size affect the rendered document only. The block editor, the
+comment cards, and the toolbar keep their own type.
+
+The **?** toolbar button opens the same guidance as an in-app help page.
+
+## 11. Keyboard shortcuts
+
+On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
+
+| Key | Where | Action |
+|---|---|---|
+| **⌘F** | Anywhere | Open the find bar, seeded with the selection |
+| **⏎** / **⇧⏎** | Find bar | Next / previous match |
+| **⌘G** / **⇧⌘G** | Anywhere, while find is open | Next / previous match |
+| **Esc** | Anywhere | Close the find bar, or the open dialog |
+| **⌘S** | Anywhere | Save now |
+| **⌘B** | Anywhere | Show or hide the sidebar |
+| **⌘↵** | Block editor | Save the block |
+| **Esc** | Block editor | Cancel the edit |
+| **Tab** | Block editor | Insert two spaces |
+| **⌘↵** | Comment composer | Save the comment |
+| **Esc** | Comment composer | Cancel the comment |
+| **⌘-click** | On a link | Open the link in a new tab |
+| **⌘O** / **⇧⌘O** | Desktop app | Open File / Open Folder |
+| **⌘P** | Desktop app | Export as PDF |
+
+---
 
 ## Comment format
 
-Comments are stored exactly in your established convention, byte-pure:
+Comments are stored in your established convention, byte-pure:
 
 ```
 <!-- GK: free-form comment text -->
 ```
 
-They are invisible in GitHub/Notion/other renderers and survive your grep-and-process
-workflow unchanged. New comments anchor to the first word of your selection.
-Highlighting uses pure-mode anchoring: a comment highlights the run of text preceding
-it within its block.
+They are invisible in GitHub, Notion, and every other Markdown renderer, and they
+survive a grep-and-process workflow unchanged. The exact grammar the app reads:
+
+- The tag starts with an uppercase letter, then any letters or digits, then any
+  number of `-`-separated segments: `GK`, `GK-FIX`, `AB`, `AB-NIT`.
+- A colon separates the tag from the body. Whitespace around both is optional.
+- Lowercase tooling comments (`<!-- prettier-ignore -->`) and tags with no colon
+  never match, so mdviewer leaves them alone.
+- An optional `/ RESPONDER:` inside the body splits it into a note and a
+  response.
+
+New comments anchor after the first word of your selection. The app highlights
+exactly the single word immediately preceding the comment, never the whole run of
+text before it.
 
 ## Desktop app (macOS)
 
-`electron/` wraps the same `mdviewer.html` as a standalone macOS `.app` (Electron
-bundles Chromium, so every API the web app uses works unchanged). This adds Finder
-**Open With** + double-click-to-open with autosave, a native File menu, and its own
-window.
+`electron/` wraps the same `mdviewer.html` as a standalone macOS `.app`. Electron
+bundles Chromium, so every API the web app uses works unchanged. The wrapper adds
+Finder **Open With** and double-click-to-open with autosave, a native File menu,
+and its own window and icon.
 
 ```
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
 npm run dist           # build dist/mdviewer-<ver>-arm64.dmg
-npm run selftest       # run the 86-check self-test inside the Electron bundle
+npm run selftest       # run the 89-check self-test inside the Electron bundle
 ```
 
-Install: open the `.dmg`, drag **mdviewer** to Applications. First launch of an
-unsigned local app: right-click → Open (or System Settings → Privacy & Security →
-Open Anyway). Then double-click any `.md`, or right-click → Open With → mdviewer; set
-it as the default for `.md` via Finder's Get Info if you like.
+Install by opening the `.dmg` and dragging **mdviewer** to Applications. The
+first launch of an unsigned local app needs right-click → Open, or System
+Settings → Privacy & Security → Open Anyway. After that, double-click any `.md`,
+or set mdviewer as the default handler for `.md` through Finder's Get Info panel.
 
-Files opened from Finder read/write through a native fs bridge (main process), so
-autosave writes straight to the original file. The in-app Open File / Open Folder
-buttons still use the File System Access API as in the browser.
+Files opened from Finder read and write through a native fs bridge in the main
+process, so autosave writes straight to the original file. The in-app **Open
+File** and **Open Folder** buttons still use the File System Access API, exactly
+as in the browser.
 
-The app is unsigned (fine for personal use). Distributing it to others would require
-Apple code signing + notarization.
+The app is unsigned, which is fine for personal use. Distributing it to others
+would require Apple code signing and notarization.
 
 ## Project layout
 
 The shipped artifact is the single self-contained `mdviewer.html`. It is assembled
-from sources so the logic can be unit-tested; you never need to build it to *use* it.
+from sources so the logic can be unit-tested; you never need to build it to *use*
+it.
 
 ```
-mdviewer.html        ← the deliverable (open this). Generated.
+mdviewer.html        <- the deliverable (open this). Generated.
 src/
-  mdcore.js          ← pure, DOM-free logic (lexing, source map, comments)
-  mdapp.js           ← browser UI (open/render/edit/autosave/comments)
-  app.css            ← styles (dark theme)
-  template.html      ← HTML shell with inline placeholders
-vendor/              ← marked, DOMPurify, highlight.js (+ css), pinned
+  mdcore.js          <- pure, DOM-free logic (lexing, source map, comments, wrapping)
+  mdapp.js           <- browser UI (open/render/edit/autosave/comments/find)
+  app.css            <- styles (dark theme)
+  template.html      <- HTML shell with inline placeholders
+vendor/              <- marked, DOMPurify, highlight.js (+ css), pinned
 tools/
-  build.js           ← inlines src + vendor -> mdviewer.html
-  selftest.sh        ← headless-Chrome smoke test of the real UI
-tests/               ← Node unit + integration tests
-samples/demo.md      ← a file to try, with example GK comments
-electron/            ← macOS desktop wrapper (main.js, preload.js, packaging)
+  build.js           <- inlines src + vendor -> mdviewer.html
+  selftest.sh        <- headless-Chrome smoke test of the real UI
+tests/               <- Node unit + integration tests
+samples/demo.md      <- a file to try, with example GK comments
+electron/            <- macOS desktop wrapper (main.js, preload.js, packaging)
+icon-concepts/       <- app icon: concepts, the chosen master, and the build script
 ```
 
 ## Develop
 
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
-node --test tests/*.test.js  # unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # in-browser checks (render, highlight, edit, comment)
+node --test tests/*.test.js  # 53 unit + integration tests (pure logic + shipped file)
+bash tools/selftest.sh       # 89 in-browser checks (render, edit, comment, find, wrap)
 ```
 
-Always rebuild after changing anything in `src/` or `vendor/`; an integration test
+Always rebuild after changing anything in `src/` or `vendor/`. An integration test
 guards against the inlined core drifting from `src/mdcore.js`.
 
 ## Scope and limits
 
-- Chromium only (File System Access API). Not Safari/Firefox.
+- Chromium only (File System Access API). Not Safari, not Firefox.
 - Math (KaTeX) and Mermaid are out of scope for now (see `spec.md` Non-goals).
-- Block-by-block rendering: reference-style link definitions that live in a different
-  block from their use, and a comment placed inside an inline emphasis/link span, are
-  edge cases that may render imperfectly.
+- Block-by-block rendering has two known edge cases: a reference-style link
+  definition that lives in a different block from its use, and a comment placed
+  inside an inline emphasis or link span, may render imperfectly.

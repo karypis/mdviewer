@@ -579,7 +579,7 @@
     var pos = MDCore.locateInsertOffset(block.raw, block.start, ps.prefix, ps.text);
     if (pos == null) pos = block.end - (block.raw.match(/\n*$/)[0].length); // fallback: end of content
     commentBtn.classList.remove('open');
-    openComposer({ type: 'new', pos: pos }, '', 'GK', ps.rect);
+    openComposer({ type: 'new', pos: pos }, '', state.settings.prefix, ps.rect);
   }
 
   function editComment(c) {
@@ -1371,6 +1371,23 @@
       check('custom responder ME splits audit trail', audit && audit.claude === 'done');
       var card = marginEl.querySelector('.comment-card .claude .tag');
       check('audit card shows the custom responder label', card && card.textContent === 'ME');
+      // a new comment must default to YOUR prefix, not a hardcoded "GK"
+      var pw = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null), ptn = null, pn;
+      while ((pn = pw.nextNode())) { if (pn.nodeValue.indexOf('Para') !== -1) { ptn = pn; break; } }
+      check('found paragraph text node', !!ptn);
+      if (ptn) {
+        var pr = document.createRange();
+        var pi = ptn.nodeValue.indexOf('Para');
+        pr.setStart(ptn, pi); pr.setEnd(ptn, pi + 4);
+        var psel = window.getSelection(); psel.removeAllRanges(); psel.addRange(pr);
+        state.pendingSel = null;
+        beginNewComment();
+        check('new comment defaults to the configured prefix',
+          composer.querySelector('select').value === 'AB');
+        composer.querySelector('textarea').value = '';
+        submitComposer(); // empty body: closes the composer, writes nothing
+        check('empty composer body writes no comment', state.comments.length === 3);
+      }
       // restore default settings
       state.settings = savedSettings; persistSettings(); populateVariants();
 
