@@ -2,7 +2,13 @@
 
 A local, single-file Markdown viewer, inline editor, and commenter. Open a `.md`
 file, read it rendered, click any block to edit it, and select text to attach
-comments that are saved into the file as `<!-- GK: ... -->` HTML comments.
+comments that are saved into the file as ordinary HTML comments, like
+`<!-- GK: ... -->`.
+
+`GK` is only the default tag. It is your initials, and you change it under
+**⚙ Settings → Comments**. Set it to `AB` and your comments become
+`<!-- AB: ... -->`. Every example below uses `GK` for concreteness; substitute
+whatever you configure.
 
 Everything runs offline. There is no server, no account, and no cloud copy: the
 app reads and writes your original file on disk. Built per `spec.md`. It works in
@@ -128,7 +134,8 @@ Selections that cross inline markup work correctly. Selecting the rendered text
 `reverse converter` inside `**reverse converter**` places the comment after
 `**reverse`, not at the end of the paragraph.
 
-**Kinds.** The dropdown offers four tags. The suffix picks the card's color:
+**Kinds.** The dropdown offers four tags, each built from your configured
+initials plus a kind suffix. The suffix picks the card's color:
 
 | Tag | Meaning | Card color |
 |---|---|---|
@@ -137,13 +144,17 @@ Selections that cross inline markup work correctly. Selecting the rendered text
 | `GK-Q` | A question | Purple |
 | `GK-NIT` | A nitpick | Gray |
 
-**Work with existing comments.** Any file that already contains
-`<!-- GK: ... -->` renders those as margin cards on open. Click a card to scroll
-to and highlight its anchor word. Each card carries **edit** and **delete**
-links. The **Clear Comments** toolbar button, which appears only when the file
-has comments, removes every one of them in a single step after a confirmation.
-HTML comments that are not review comments, such as `<!-- prettier-ignore -->`,
-are never touched.
+Only the `GK` half is yours to change. Set your initials to `AB` under
+**⚙ Settings → Comments** and the dropdown offers `AB`, `AB-FIX`, `AB-Q`, and
+`AB-NIT` instead. The four kind suffixes and their colors are fixed.
+
+**Work with existing comments.** Any file that already contains review comments,
+whatever initials they carry, renders them as margin cards on open. Click a card
+to scroll to and highlight its anchor word. Each card carries **edit** and
+**delete** links. The **Clear Comments** toolbar button, which appears only when
+the file has comments, removes every one of them in a single step after a
+confirmation. HTML comments that are not review comments, such as
+`<!-- prettier-ignore -->`, are never touched.
 
 **Audit trail.** A comment can carry a response, separated by a slash:
 
@@ -216,7 +227,7 @@ Click **⚙** in the toolbar. Settings persist in `localStorage` under
 |---|---|---|---|
 | Document font | System, Helvetica/Arial, Georgia, Charter/New York, Monospace | System | Font of the rendered document |
 | Font size | 11 to 28 px | 15 | Base size. Headings, code, and tables scale with it |
-| Your initials | 1 to 6 letters or digits, uppercased | `GK` | The tag on comments you create |
+| Your initials | 1 to 6 letters or digits, uppercased | `GK` | The tag on comments you create. Replaces `GK` everywhere |
 | Audit-trail responder | 1 to 16 letters, digits, or hyphens, uppercased | `CLAUDE` | The name that splits a comment from its response |
 | Hard-wrap width | `auto`, a number, or `0` | `auto` | Column that edited paragraphs are wrapped to on save |
 
@@ -253,11 +264,17 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 Comments are stored in your established convention, byte-pure:
 
 ```
-<!-- GK: free-form comment text -->
+<!-- TAG: free-form comment text -->
 ```
 
-They are invisible in GitHub, Notion, and every other Markdown renderer, and they
-survive a grep-and-process workflow unchanged. The exact grammar the app reads:
+`TAG` is your initials, optionally followed by a kind suffix. With the default
+settings that reads `<!-- GK: ... -->` or `<!-- GK-FIX: ... -->`; configure your
+initials as `AB` and it reads `<!-- AB: ... -->`. Nothing about the format is
+hardcoded to `GK`.
+
+The comments are invisible in GitHub, Notion, and every other Markdown renderer,
+and they survive a grep-and-process workflow unchanged. The exact grammar the app
+reads:
 
 - The tag starts with an uppercase letter, then any letters or digits, then any
   number of `-`-separated segments: `GK`, `GK-FIX`, `AB`, `AB-NIT`.
@@ -265,7 +282,11 @@ survive a grep-and-process workflow unchanged. The exact grammar the app reads:
 - Lowercase tooling comments (`<!-- prettier-ignore -->`) and tags with no colon
   never match, so mdviewer leaves them alone.
 - An optional `/ RESPONDER:` inside the body splits it into a note and a
-  response.
+  response. `RESPONDER` defaults to `CLAUDE` and is configurable too.
+
+The app renders *every* tag matching that grammar, not just yours. It writes new
+comments with the initials you configured. That is what lets two people comment
+in the same file and each see both sets of notes.
 
 New comments anchor after the first word of your selection. The app highlights
 exactly the single word immediately preceding the comment, never the whole run of
