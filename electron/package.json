@@ -8,7 +8,7 @@
     "sync": "node ../tools/build.js && cp ../mdviewer.html ./mdviewer.html",
     "start": "npm run sync && electron .",
     "selftest": "npm run sync && MDVIEWER_SELFTEST=1 electron .",
-    "dist": "npm run sync && electron-builder"
+    "dist": "npm run sync && electron-builder --config.directories.output=\"${MDVIEWER_OUT:-dist}\""
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -17,6 +17,7 @@
   "build": {
     "appId": "net.karypis.mdviewer",
     "productName": "mdviewer",
+    "afterPack": "build/after-pack.js",
     "files": [
       "main.js",
       "preload.js",
@@ -27,21 +28,34 @@
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "identity": null,
       "fileAssociations": [
         {
           "ext": "md",
           "name": "Markdown",
-          "role": "Editor"
+          "role": "Editor",
+          "rank": "Owner",
+          "isPackage": false
         },
         {
           "ext": "markdown",
           "name": "Markdown",
-          "role": "Editor"
+          "role": "Editor",
+          "rank": "Owner",
+          "isPackage": false
         }
       ]
+    },
+    "dmg": {
+      "title": "mdviewer ${version}"
     }
   },
   "dependencies": {

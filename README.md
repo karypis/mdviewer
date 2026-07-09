@@ -15,8 +15,11 @@ because it uses the File System Access API for direct, autosaving disk access.
 install, no build, no server. Click **Open File**, pick a Markdown file, and grant
 read/write permission when the browser asks.
 
-**As a macOS app.** Build it once (see [Desktop app](#desktop-app-macos)), drag
-`mdviewer` to Applications, then double-click any `.md` file.
+**As a macOS app.** Download the `.dmg` from the
+[latest release](https://github.com/karypis/mdviewer/releases/latest), drag
+**mdviewer** to Applications, and double-click any `.md` file. See
+[Install the macOS app](#install-the-macos-app) for the first-launch step that
+unsigned apps require.
 
 Try `samples/demo.md`. It ships with example comments already in it.
 
@@ -268,33 +271,81 @@ New comments anchor after the first word of your selection. The app highlights
 exactly the single word immediately preceding the comment, never the whole run of
 text before it.
 
-## Desktop app (macOS)
+## Install the macOS app
 
 `electron/` wraps the same `mdviewer.html` as a standalone macOS `.app`. Electron
 bundles Chromium, so every API the web app uses works unchanged. The wrapper adds
 Finder **Open With** and double-click-to-open with autosave, a native File menu,
 and its own window and icon.
 
+### Download
+
+Grab the `.dmg` for your Mac from the
+[**Releases** page](https://github.com/karypis/mdviewer/releases/latest). The
+disk images are release assets, not files in this repository, because each one is
+about 100 MB.
+
+| File | For |
+|---|---|
+| `mdviewer-<ver>-arm64.dmg` | Apple Silicon (M1 and later) |
+| `mdviewer-<ver>.dmg` | Intel |
+
+Run `uname -m` if you are unsure: `arm64` means Apple Silicon, `x86_64` means
+Intel.
+
+### Install
+
+1. Open the `.dmg` and drag **mdviewer** onto the **Applications** shortcut.
+2. Eject the disk image, then launch mdviewer once from Applications.
+
+The app is ad-hoc signed rather than signed with an Apple Developer ID, so on
+first launch macOS reports an unidentified developer. Right-click the app in
+Applications and choose **Open**, then confirm. You only do this once. If macOS
+instead calls the app damaged, clear the download quarantine flag and reopen:
+
 ```
-cd electron
-npm install            # one-time (downloads Electron)
-npm start              # run the app from source
-npm run dist           # build dist/mdviewer-<ver>-arm64.dmg
-npm run selftest       # run the 89-check self-test inside the Electron bundle
+xattr -dr com.apple.quarantine /Applications/mdviewer.app
 ```
 
-Install by opening the `.dmg` and dragging **mdviewer** to Applications. The
-first launch of an unsigned local app needs right-click → Open, or System
-Settings → Privacy & Security → Open Anyway. After that, double-click any `.md`,
-or set mdviewer as the default handler for `.md` through Finder's Get Info panel.
+### Markdown file association
+
+The bundle claims `.md` and `.markdown` as an **Editor** with `LSHandlerRank`
+set to `Owner`, so macOS registers mdviewer as a handler the first time you
+launch it. After that, `.md` files show the mdviewer icon and right-click →
+**Open With** lists it.
+
+macOS does not let an installer silently seize a file type that another app
+already owns. If double-clicking a `.md` file still opens something else, set the
+default once: select any `.md` file in Finder, press **⌘I**, choose **mdviewer**
+under **Open with**, then click **Change All…**.
 
 Files opened from Finder read and write through a native fs bridge in the main
 process, so autosave writes straight to the original file. The in-app **Open
 File** and **Open Folder** buttons still use the File System Access API, exactly
 as in the browser.
 
-The app is unsigned, which is fine for personal use. Distributing it to others
-would require Apple code signing and notarization.
+### Build it yourself
+
+```
+cd electron
+npm install            # one-time (downloads Electron)
+npm start              # run the app from source
+npm run selftest       # run the 89-check self-test inside the Electron bundle
+npm run dist           # build both .dmg files into electron/dist/
+```
+
+`npm run dist` ad-hoc signs each bundle through the `build/after-pack.js` hook.
+codesign refuses to sign files carrying `com.apple.FinderInfo` or resource-fork
+extended attributes, which a cloud-sync daemon (Google Drive, Dropbox, iCloud)
+re-stamps at unpredictable moments. The hook strips them before every codesign
+call. If the sync daemon still wins the race, build outside the synced folder:
+
+```
+MDVIEWER_OUT=/tmp/mdv-build npm run dist
+```
+
+Shipping to others without the unidentified-developer prompt would require an
+Apple Developer ID certificate and notarization, which this project does not use.
 
 ## Project layout
 
@@ -316,6 +367,7 @@ tools/
 tests/               <- Node unit + integration tests
 samples/demo.md      <- a file to try, with example GK comments
 electron/            <- macOS desktop wrapper (main.js, preload.js, packaging)
+  build/after-pack.js  <- ad-hoc signs the .app before the .dmg is built
 icon-concepts/       <- app icon: concepts, the chosen master, and the build script
 ```
 
