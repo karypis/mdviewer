@@ -111,3 +111,63 @@ test('rewrapAt: width 0 is a no-op', () => {
   const src = 'a b c d e f g h i j k l m n o p q r s t u v w x y z one two three four five\n';
   assert.strictEqual(MDCore.rewrapAt(src, 3, 0), src);
 });
+
+// ---- authored plain-text layout must never be reflowed -------------------
+// Regression: a numbered plain-text outline ("3.1 ...\n    continued") is not a
+// markdown list, so marked types it as a `paragraph` and it reached wrapText.
+// Greedy reflow joined every line, collapsing the hanging indents and welding
+// separate items into one prose run. See hasAuthoredLayout in src/mdcore.js.
+
+test('wrapText refuses to reflow a numbered outline with hanging indents', () => {
+  const src = [
+    "3.7 Persist check-failure detail in the run record (deferred from the work order;",
+    "    today the detail survives only in the console output).",
+    "3.8 Harden the external-evidence machinery it inherits from arm B: `external.py`",
+    "    should scope quote matching to the claim's own source block.",
+  ].join('\n');
+  assert.strictEqual(MDCore.wrapText(src, 94), src, 'must be returned byte-for-byte');
+});
+
+test('the corruption itself: items must not weld together', () => {
+  const src = '3.7 Persist detail in the run record.\n    Today it survives only in the console.\n3.8 Harden the machinery.';
+  const out = MDCore.wrapText(src, 94);
+  assert.ok(!/console\. 3\.8/.test(out), 'item 3.8 must not be pulled onto 3.7\'s line');
+  assert.ok(/\n3\.8 Harden/.test(out), '3.8 must still start its own line');
+  assert.ok(/\n    Today/.test(out), 'the hanging indent must survive');
+});
+
+test('wrapText refuses to reflow bullets that never became a real list', () => {
+  // 4-space-indented bullets under a paragraph line are lazy continuations, so
+  // marked folds them into the paragraph. Reflowing would inline the "-".
+  const src = [
+    '1.5 **Nested symbolic execution.** A new worker kind runs another procedure.',
+    '    - Why: the deepest cases are themselves procedures.',
+    '    - How: `worker: { kind: procedure }`.',
+  ].join('\n');
+  assert.strictEqual(MDCore.wrapText(src, 94), src);
+});
+
+test('hasAuthoredLayout distinguishes authored layout from ordinary prose', () => {
+  assert.strictEqual(MDCore.hasAuthoredLayout(['a normal', 'soft wrapped', 'paragraph']), false);
+  assert.strictEqual(MDCore.hasAuthoredLayout(['one line only']), false);
+  assert.strictEqual(MDCore.hasAuthoredLayout(['head', '    indented']), true);
+  assert.strictEqual(MDCore.hasAuthoredLayout(['head', '- stalled bullet']), true);
+});
+
+test('ordinary soft-wrapped prose still reflows (the feature is not lost)', () => {
+  const src = 'alpha bravo\ncharlie delta\necho';
+  assert.strictEqual(MDCore.wrapText(src, 20), 'alpha bravo charlie\ndelta echo');
+});
+
+test('detectWrapWidth ignores hanging-indent blocks when learning the column', () => {
+  // The outline's indented lines are not evidence of the prose column.
+  const src = [
+    '3.1 An item with a hanging indent that is quite long indeed and then some more.',
+    '        a deeply indented continuation line',
+    '',
+    'Ordinary prose wrapped at a narrow column',
+    'that teaches the real width.',
+    '',
+  ].join('\n');
+  assert.strictEqual(MDCore.detectWrapWidth(src), 'Ordinary prose wrapped at a narrow column'.length);
+});

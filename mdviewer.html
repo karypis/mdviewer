@@ -2014,15 +2014,37 @@ return He}()
     return false;
   }
 
+  // True if the block carries line structure the author put there on purpose,
+  // which greedy reflow would destroy.
+  //
+  // Markdown collapses a soft-wrapped paragraph into one run of prose, so a
+  // genuine prose paragraph never has a continuation line that starts with
+  // whitespace or with a bullet. When one does, the block is a plain-text
+  // layout that only LOOKS like a list to a human: numbered items with hanging
+  // indents ("3.1 ...\n    continued"), or bullets indented too deep to have
+  // become a real list. Markdown renders those as a single paragraph, which is
+  // exactly why they reach this function typed as `paragraph` rather than
+  // `list`. Reflowing them joins every line and re-packs, collapsing the
+  // indents and welding separate items into one another. Refuse.
+  function hasAuthoredLayout(lines) {
+    for (var i = 1; i < lines.length; i++) { // line 0 of a paragraph is never indented
+      if (/^[ \t]/.test(lines[i])) return true;      // hanging indent / continuation
+      if (/^[-*+][ \t]/.test(lines[i])) return true; // bullet that never became a list
+    }
+    return false;
+  }
+
   // Reflow prose `text` to `width` columns by greedy word packing. HTML
   // comments (<!-- GK: ... -->) are atomic tokens that are never split, even
   // when they contain spaces, so a comment never gets broken across lines.
-  // Returns `text` unchanged when width<=0 or the text has hard breaks.
+  // Returns `text` unchanged when width<=0, or when reflow would destroy hard
+  // breaks or an authored plain-text layout.
   function wrapText(text, width) {
     text = String(text == null ? '' : text);
     if (!width || width <= 0) return text;
     var lines = text.split('\n');
     if (hasHardBreak(lines)) return text;
+    if (hasAuthoredLayout(lines)) return text;
     var joined = lines.join(' ');
     var tokens = joined.match(/(?:<!--[\s\S]*?-->|\S)+/g);
     if (!tokens) return text; // blank / whitespace only
@@ -2060,7 +2082,9 @@ return He}()
       var raw = blocks[i].raw;
       var content = raw.slice(0, raw.length - raw.match(/\n*$/)[0].length);
       var lines = content.split('\n');
-      if (lines.length < 2 || hasHardBreak(lines)) continue;
+      // Skip blocks we would never reflow anyway; their line lengths (hanging
+      // indents, stalled bullets) are not evidence of the file's prose column.
+      if (lines.length < 2 || hasHardBreak(lines) || hasAuthoredLayout(lines)) continue;
       for (var k = 0; k < lines.length - 1; k++) {
         if (lines[k].indexOf('<!--') !== -1) continue;
         var len = lines[k].replace(/\s+$/, '').length;
@@ -2224,6 +2248,7 @@ return He}()
     locateInsertOffset: locateInsertOffset,
     projectPlain: projectPlain,
     lastWordRange: lastWordRange,
+    hasAuthoredLayout: hasAuthoredLayout,
     wrapText: wrapText,
     wrapBlockRaw: wrapBlockRaw,
     detectWrapWidth: detectWrapWidth,
@@ -3025,7 +3050,7 @@ return He}()
     autosize(ta);
     ta.focus();
     ta.selectionStart = ta.selectionEnd = editText.length;
-    ta._trailer = trailer; ta._block = block;
+    ta._trailer = trailer; ta._block = block; ta._orig = editText;
     ta.addEventListener('input', function () { autosize(ta); });
     ta.addEventListener('keydown', onEditKey);
     ta.addEventListener('blur', function () { commitEdit(idx); });
@@ -3058,6 +3083,12 @@ return He}()
     var ta = blockEl.querySelector('textarea');
     if (!ta) { state.editing = null; return; }
     var block = ta._block;
+    // A click is how you ENTER the editor, and clicking away is how you leave
+    // it, so an untouched block must never be written. Re-wrapping is not
+    // guaranteed idempotent, so deciding this on the POST-wrap bytes would let
+    // a stray click silently reflow (and reformat) a block the user only looked
+    // at. Compare what is in the textarea against what we put there.
+    if (ta.value === ta._orig) { state.editing = null; renderAll(); return; }
     var newRaw = ta.value + ta._trailer;
     // Re-hard-wrap prose to the file's column width so the saved file keeps its
     // line-length constraint. Only paragraphs; code/tables/lists stay verbatim.
@@ -3683,6 +3714,41 @@ return He}()
       commitEdit(ai);
       check('auto re-wrap reproduces the file wrapping exactly',
         state.source.replace(/\n+$/, '') === sample40);
+
+      // --- a click must never rewrite the file --------------------------
+      // Clicking a block ENTERS the editor and clicking away commits it, so
+      // opening a block and leaving it untouched must be a pure no-op. The old
+      // guard compared post-wrap bytes, which let a stray click silently reflow
+      // a block the user only looked at.
+      state.settings.wrap = 'auto';
+      var outline = [
+        '3.7 Persist check-failure detail in the run record (deferred from the work order;',
+        '    today the detail survives only in the console output).',
+        '3.8 Harden the external-evidence machinery it inherits from arm B: `external.py`',
+        "    should scope quote matching to the claim's own source block.",
+        '',
+      ].join('\n');
+      setSource(outline);
+      check('a numbered outline is one paragraph, not a list',
+        state.blocks[0].type === 'paragraph');
+      var oi = firstPara();
+      enterEdit(oi);
+      commitEdit(oi); // opened and left alone: the user typed nothing
+      check('clicking a block and leaving it does NOT rewrite the file',
+        state.source === outline);
+      check('hanging indents survive an untouched click',
+        state.source.indexOf('\n    today the detail') !== -1);
+      check('numbered items do not weld together on click',
+        state.source.indexOf('\n3.8 Harden') !== -1);
+
+      // Even a REAL edit must not reflow authored plain-text layout.
+      enterEdit(oi);
+      docEl.querySelector('.block[data-idx="' + oi + '"] textarea').value =
+        outline.replace(/\n+$/, '') + '\n3.9 A new item.';
+      commitEdit(oi);
+      check('a real edit still preserves the outline layout',
+        state.source.indexOf('\n    today the detail') !== -1 &&
+        state.source.indexOf('\n3.9 A new item.') !== -1);
 
       // --- resizable panels: gutter drag adjusts widths ------------------
       var shellRect = $('shell').getBoundingClientRect();

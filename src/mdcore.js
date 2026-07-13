@@ -210,15 +210,37 @@
     return false;
   }
 
+  // True if the block carries line structure the author put there on purpose,
+  // which greedy reflow would destroy.
+  //
+  // Markdown collapses a soft-wrapped paragraph into one run of prose, so a
+  // genuine prose paragraph never has a continuation line that starts with
+  // whitespace or with a bullet. When one does, the block is a plain-text
+  // layout that only LOOKS like a list to a human: numbered items with hanging
+  // indents ("3.1 ...\n    continued"), or bullets indented too deep to have
+  // become a real list. Markdown renders those as a single paragraph, which is
+  // exactly why they reach this function typed as `paragraph` rather than
+  // `list`. Reflowing them joins every line and re-packs, collapsing the
+  // indents and welding separate items into one another. Refuse.
+  function hasAuthoredLayout(lines) {
+    for (var i = 1; i < lines.length; i++) { // line 0 of a paragraph is never indented
+      if (/^[ \t]/.test(lines[i])) return true;      // hanging indent / continuation
+      if (/^[-*+][ \t]/.test(lines[i])) return true; // bullet that never became a list
+    }
+    return false;
+  }
+
   // Reflow prose `text` to `width` columns by greedy word packing. HTML
   // comments (<!-- GK: ... -->) are atomic tokens that are never split, even
   // when they contain spaces, so a comment never gets broken across lines.
-  // Returns `text` unchanged when width<=0 or the text has hard breaks.
+  // Returns `text` unchanged when width<=0, or when reflow would destroy hard
+  // breaks or an authored plain-text layout.
   function wrapText(text, width) {
     text = String(text == null ? '' : text);
     if (!width || width <= 0) return text;
     var lines = text.split('\n');
     if (hasHardBreak(lines)) return text;
+    if (hasAuthoredLayout(lines)) return text;
     var joined = lines.join(' ');
     var tokens = joined.match(/(?:<!--[\s\S]*?-->|\S)+/g);
     if (!tokens) return text; // blank / whitespace only
@@ -256,7 +278,9 @@
       var raw = blocks[i].raw;
       var content = raw.slice(0, raw.length - raw.match(/\n*$/)[0].length);
       var lines = content.split('\n');
-      if (lines.length < 2 || hasHardBreak(lines)) continue;
+      // Skip blocks we would never reflow anyway; their line lengths (hanging
+      // indents, stalled bullets) are not evidence of the file's prose column.
+      if (lines.length < 2 || hasHardBreak(lines) || hasAuthoredLayout(lines)) continue;
       for (var k = 0; k < lines.length - 1; k++) {
         if (lines[k].indexOf('<!--') !== -1) continue;
         var len = lines[k].replace(/\s+$/, '').length;
@@ -420,6 +444,7 @@
     locateInsertOffset: locateInsertOffset,
     projectPlain: projectPlain,
     lastWordRange: lastWordRange,
+    hasAuthoredLayout: hasAuthoredLayout,
     wrapText: wrapText,
     wrapBlockRaw: wrapBlockRaw,
     detectWrapWidth: detectWrapWidth,

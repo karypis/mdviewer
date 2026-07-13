@@ -792,7 +792,7 @@
     autosize(ta);
     ta.focus();
     ta.selectionStart = ta.selectionEnd = editText.length;
-    ta._trailer = trailer; ta._block = block;
+    ta._trailer = trailer; ta._block = block; ta._orig = editText;
     ta.addEventListener('input', function () { autosize(ta); });
     ta.addEventListener('keydown', onEditKey);
     ta.addEventListener('blur', function () { commitEdit(idx); });
@@ -825,6 +825,12 @@
     var ta = blockEl.querySelector('textarea');
     if (!ta) { state.editing = null; return; }
     var block = ta._block;
+    // A click is how you ENTER the editor, and clicking away is how you leave
+    // it, so an untouched block must never be written. Re-wrapping is not
+    // guaranteed idempotent, so deciding this on the POST-wrap bytes would let
+    // a stray click silently reflow (and reformat) a block the user only looked
+    // at. Compare what is in the textarea against what we put there.
+    if (ta.value === ta._orig) { state.editing = null; renderAll(); return; }
     var newRaw = ta.value + ta._trailer;
     // Re-hard-wrap prose to the file's column width so the saved file keeps its
     // line-length constraint. Only paragraphs; code/tables/lists stay verbatim.
@@ -1450,6 +1456,41 @@
       commitEdit(ai);
       check('auto re-wrap reproduces the file wrapping exactly',
         state.source.replace(/\n+$/, '') === sample40);
+
+      // --- a click must never rewrite the file --------------------------
+      // Clicking a block ENTERS the editor and clicking away commits it, so
+      // opening a block and leaving it untouched must be a pure no-op. The old
+      // guard compared post-wrap bytes, which let a stray click silently reflow
+      // a block the user only looked at.
+      state.settings.wrap = 'auto';
+      var outline = [
+        '3.7 Persist check-failure detail in the run record (deferred from the work order;',
+        '    today the detail survives only in the console output).',
+        '3.8 Harden the external-evidence machinery it inherits from arm B: `external.py`',
+        "    should scope quote matching to the claim's own source block.",
+        '',
+      ].join('\n');
+      setSource(outline);
+      check('a numbered outline is one paragraph, not a list',
+        state.blocks[0].type === 'paragraph');
+      var oi = firstPara();
+      enterEdit(oi);
+      commitEdit(oi); // opened and left alone: the user typed nothing
+      check('clicking a block and leaving it does NOT rewrite the file',
+        state.source === outline);
+      check('hanging indents survive an untouched click',
+        state.source.indexOf('\n    today the detail') !== -1);
+      check('numbered items do not weld together on click',
+        state.source.indexOf('\n3.8 Harden') !== -1);
+
+      // Even a REAL edit must not reflow authored plain-text layout.
+      enterEdit(oi);
+      docEl.querySelector('.block[data-idx="' + oi + '"] textarea').value =
+        outline.replace(/\n+$/, '') + '\n3.9 A new item.';
+      commitEdit(oi);
+      check('a real edit still preserves the outline layout',
+        state.source.indexOf('\n    today the detail') !== -1 &&
+        state.source.indexOf('\n3.9 A new item.') !== -1);
 
       // --- resizable panels: gutter drag adjusts widths ------------------
       var shellRect = $('shell').getBoundingClientRect();
