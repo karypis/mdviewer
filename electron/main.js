@@ -108,6 +108,8 @@ function buildMenu() {
       { label: 'Open File…', accelerator: 'CmdOrCtrl+O', click: send('open-file') },
       { label: 'Open Folder…', accelerator: 'CmdOrCtrl+Shift+O', click: send('open-folder') },
       { type: 'separator' },
+      { label: 'Reload from Disk', accelerator: 'CmdOrCtrl+R', click: send('reload-file') },
+      { type: 'separator' },
       { label: 'Export as PDF…', accelerator: 'CmdOrCtrl+P', click: send('export-pdf') },
       { type: 'separator' },
       process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },

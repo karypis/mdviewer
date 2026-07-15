@@ -24,6 +24,7 @@
     settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
     detectedWidth: 0,     // hard-wrap column inferred from the loaded file
     source: '',
+    diskSource: '',       // bytes last read from / written to disk (the clean baseline)
     blocks: [],
     comments: [],
     fileName: '',
@@ -145,9 +146,18 @@
   async function loadHandle(h) {
     var file = await h.getFile();
     state.fileName = h.name;
-    var text = await file.text();
-    setSource(text);
     $('filename').textContent = h.name;
+    applyLoadedText(await file.text());
+  }
+
+  // Install `text` as the current document and mark it clean: it is exactly what
+  // is on disk. Abandons any open editor and cancels a pending autosave so a
+  // stale write cannot fire afterward. Shared by the initial load and reload.
+  function applyLoadedText(text) {
+    clearTimeout(state.saveTimer);
+    state.editing = null;
+    setSource(text);
+    state.diskSource = text;   // clean baseline: memory == disk
     setSaveState('saved');
     if (!state.dirHandle) renderSidebarOutline();
   }
@@ -156,9 +166,11 @@
     if (!state.fileHandle) return;
     try {
       setSaveState('saving');
+      var bytes = state.source;              // snapshot: source may change mid-write
       var w = await state.fileHandle.createWritable();
-      await w.write(state.source);
+      await w.write(bytes);
       await w.close();
+      state.diskSource = bytes;              // these bytes are now the clean baseline
       setSaveState('saved');
     } catch (e) {
       setSaveState('error', 'Save failed');
@@ -171,6 +183,61 @@
     clearTimeout(state.saveTimer);
     if (immediate) { writeFile(); return; }
     state.saveTimer = setTimeout(writeFile, 500);
+  }
+
+  // Re-read the current file from disk, discarding the in-memory copy, to pick
+  // up an external change (the app does not watch the file). Reloading destroys
+  // whatever is in memory, so if the in-memory copy holds edits that never
+  // reached disk (an autosave still pending, or a failed write), we STOP and let
+  // the user save that work to a separate file first rather than lose it.
+  async function reloadFromDisk() {
+    if (!state.fileHandle) { toast('No file to reload'); return; }
+    var disk;
+    try { disk = await (await state.fileHandle.getFile()).text(); }
+    catch (e) { toast('Reload failed: ' + e.message); return; }
+    if (disk === state.source) { toast('Already up to date'); return; }
+    // Unsaved edits = the in-memory copy diverges from the clean baseline we last
+    // read or wrote. If so, flag it before discarding; otherwise reload straight.
+    if (state.source !== state.diskSource) { showModal('reloadPrompt'); return; }
+    applyLoadedText(disk);
+    toast('Reloaded from disk');
+  }
+
+  // Re-read the file fresh and install it. Called from the reload prompt after
+  // the user has decided; re-reading (rather than reusing the earlier read)
+  // picks up anything an autosave flushed while the prompt was open.
+  async function applyReloadFromHandle() {
+    try {
+      applyLoadedText(await (await state.fileHandle.getFile()).text());
+      toast('Reloaded from disk');
+    } catch (e) { toast('Reload failed: ' + e.message); }
+  }
+
+  function discardAndReload() { closeModal(); applyReloadFromHandle(); }
+
+  // Save the current (unsaved) in-memory copy to a NEW file the user picks, then
+  // reload the original from disk. On cancel or failure, nothing is reloaded, so
+  // the unsaved work stays safe in memory.
+  async function saveCopyAndReload() {
+    if (!window.showSaveFilePicker) { toast('Save a copy is unavailable in this browser'); return; }
+    var name = state.fileName || 'document.md';
+    var dot = name.lastIndexOf('.');
+    var base = dot > 0 ? name.slice(0, dot) : name;
+    var ext = dot > 0 ? name.slice(dot) : '.md';
+    try {
+      var opts = { suggestedName: base + '-unsaved' + ext,
+        types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }] };
+      if (state.startDir) opts.startIn = state.startDir;
+      var h = await window.showSaveFilePicker(opts);
+      var w = await h.createWritable();
+      await w.write(state.source);
+      await w.close();
+      closeModal();
+      toast('Saved a copy to ' + h.name);
+      await applyReloadFromHandle();
+    } catch (e) {
+      if (e.name !== 'AbortError') toast('Save a copy failed: ' + e.message);
+    }
   }
 
   // ---- reopen-last via IndexedDB ---------------------------------------
@@ -714,6 +781,7 @@
     $('modalBackdrop').classList.add('hidden');
     $('settings').classList.add('hidden');
     $('help').classList.add('hidden');
+    $('reloadPrompt').classList.add('hidden');
   }
 
   function openComposer(mode, body, tag, anchorRect) {
@@ -1035,6 +1103,9 @@
     $('helpOk').addEventListener('click', closeModal);
     $('setSave').addEventListener('click', saveSettings);
     $('setCancel').addEventListener('click', closeModal);
+    $('reloadCancel').addEventListener('click', closeModal);
+    $('reloadDiscard').addEventListener('click', discardAndReload);
+    $('reloadSaveAs').addEventListener('click', saveCopyAndReload);
     $('modalBackdrop').addEventListener('click', closeModal);
     $('setPrefix').addEventListener('input', function () {
       $('prefixPreview').textContent = cleanPrefix(this.value) || DEFAULT_SETTINGS.prefix;
@@ -1079,6 +1150,7 @@
       }
       else if (mod && e.key === 's') { e.preventDefault(); writeFile(); }
       else if (mod && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
+      else if (mod && (e.key === 'r' || e.key === 'R') && !e.shiftKey) { e.preventDefault(); reloadFromDisk(); }
     });
 
     // Remember the folder to start pickers in (set once you open a folder).
@@ -1104,6 +1176,8 @@
         state: state, beginNewComment: beginNewComment, submitComposer: submitComposer,
         composer: composer, enterEdit: enterEdit, commitEdit: commitEdit,
         deleteComment: deleteComment, writeFile: writeFile,
+        reloadFromDisk: reloadFromDisk, scheduleSave: scheduleSave,
+        discardAndReload: discardAndReload, saveCopyAndReload: saveCopyAndReload,
         clearAllComments: clearAllComments,
         pickerStart: pickerStart, setStartDir: setStartDir,
         toggleSidebar: toggleSidebar, buildTree: buildTree, exportPDF: exportPDF,
@@ -1125,6 +1199,7 @@
         window.electronAPI.onMenuAction(function (a) {
           if (a === 'open-file') openFile();
           else if (a === 'open-folder') openFolder();
+          else if (a === 'reload-file') reloadFromDisk();
           else if (a === 'export-pdf') exportPDF();
           else if (a === 'toggle-sidebar') toggleSidebar();
         });
@@ -1491,6 +1566,81 @@
       check('a real edit still preserves the outline layout',
         state.source.indexOf('\n    today the detail') !== -1 &&
         state.source.indexOf('\n3.9 A new item.') !== -1);
+
+      // --- reload from disk (⌘R) -----------------------------------------
+      // A fake handle whose bytes we can change out from under the app, standing
+      // in for an external edit. `written` records what the app writes through
+      // the handle so we can verify a save-a-copy target.
+      var savedFH = state.fileHandle;
+      var diskText = 'line one\nline two on disk\n';
+      var written = null;
+      state.fileHandle = {
+        name: 'reload.md',
+        getFile: function () {
+          return Promise.resolve({ name: 'reload.md', text: function () { return Promise.resolve(diskText); } });
+        },
+        createWritable: function () {
+          return Promise.resolve({ write: function (d) { written = d; return Promise.resolve(); },
+            close: function () { return Promise.resolve(); } });
+        },
+      };
+      state.fileName = 'reload.md';
+
+      // A clean reload (no unsaved edits) applies disk bytes straight, abandons
+      // an open editor, and cancels a queued autosave.
+      applyLoadedText('in memory, clean\n'); // sets diskSource == source
+      diskText = 'externally changed\n';
+      var rwrote = false;
+      state.saveTimer = setTimeout(function () { rwrote = true; }, 5);
+      state.editing = 0;
+      await reloadFromDisk();
+      check('clean reload takes the external disk bytes', state.source === 'externally changed\n');
+      check('reload abandons the open editor', state.editing === null);
+      await new Promise(function (r) { setTimeout(r, 20); });
+      check('reload cancels the queued autosave', rwrote === false);
+
+      // No divergence: reload is a no-op ("Already up to date").
+      var beforeNoop = state.source;
+      await reloadFromDisk();
+      check('reload with no changes leaves the document untouched', state.source === beforeNoop);
+
+      // Unsaved edits + an external change: reload must STOP and flag it, not
+      // silently discard the in-memory work.
+      applyLoadedText('shared base\n');
+      state.source = 'shared base\nmy unsaved edit\n';   // dirty: source != diskSource
+      diskText = 'shared base\nsomeone elses edit\n';    // and disk moved too
+      await reloadFromDisk();
+      check('unsaved edits raise the reload prompt', !$('reloadPrompt').classList.contains('hidden'));
+      check('the prompt does not touch the document', state.source === 'shared base\nmy unsaved edit\n');
+
+      // "Save a Copy" writes the in-memory version to a new file, then reloads.
+      var picked = { name: 'reload-unsaved.md',
+        createWritable: function () {
+          return Promise.resolve({ write: function (d) { written = d; return Promise.resolve(); },
+            close: function () { return Promise.resolve(); } });
+        } };
+      var realPicker = window.showSaveFilePicker;
+      window.showSaveFilePicker = function () { return Promise.resolve(picked); };
+      await saveCopyAndReload();
+      window.showSaveFilePicker = realPicker;
+      check('save-a-copy writes the unsaved in-memory version', written === 'shared base\nmy unsaved edit\n');
+      check('after saving the copy, the original reloads from disk',
+        state.source === 'shared base\nsomeone elses edit\n');
+      check('the reload prompt closes after saving a copy',
+        $('reloadPrompt').classList.contains('hidden'));
+
+      // "Discard & Reload" throws the unsaved edit away and takes disk.
+      applyLoadedText('base\n');
+      state.source = 'base\nunsaved\n';
+      diskText = 'base\ndisk wins\n';
+      await reloadFromDisk();
+      check('discard path is offered for unsaved edits', !$('reloadPrompt').classList.contains('hidden'));
+      discardAndReload();
+      await new Promise(function (r) { setTimeout(r, 10); });
+      check('discard & reload takes the disk version', state.source === 'base\ndisk wins\n');
+
+      state.fileHandle = savedFH;
+      state.fileName = '';
 
       // --- resizable panels: gutter drag adjusts widths ------------------
       var shellRect = $('shell').getBoundingClientRect();

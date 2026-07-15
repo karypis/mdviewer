@@ -108,6 +108,18 @@
     </div>
   </div>
 
+  <div id="reloadPrompt" class="modal hidden">
+    <h2>Unsaved changes</h2>
+    <p class="hint">This file has edits in the viewer that are not on disk.
+      Reloading takes the version on disk and discards those edits. Save the
+      current version to a separate file first, or discard it.</p>
+    <div class="row">
+      <button class="cancel" id="reloadCancel">Cancel</button>
+      <button id="reloadDiscard">Discard &amp; Reload</button>
+      <button class="primary" id="reloadSaveAs">Save a Copy…</button>
+    </div>
+  </div>
+
   <div id="help" class="modal modal-lg hidden">
     <button class="modal-close" id="helpClose">×</button>
     <h2>How mdviewer works</h2>
@@ -120,7 +132,10 @@
       <h3>Read</h3>
       <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
         Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>. Drag the thin
-        bars between the panels to resize them; the widths are remembered.</p>
+        bars between the panels to resize them; the widths are remembered.
+        <b>⌘R</b> (File &rarr; Reload from Disk) re-reads the open file from disk
+        so an external edit shows up. If the in-memory copy has unsaved edits, it
+        first offers to save them to a separate file.</p>
       <h3>Find</h3>
       <p>Press <b>⌘F</b> to search the document. Type to highlight matches;
         <b>⏎</b> jumps to the next, <b>⇧⏎</b> the previous, <b>Esc</b> closes.</p>

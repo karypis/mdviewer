@@ -72,6 +72,18 @@ right-click → **Open With** → mdviewer. Files opened this way read and write
 through a native bridge in the Electron main process, so autosave writes straight
 to the original path with no permission prompt.
 
+**Reload from disk (⌘R).** mdviewer holds the open file in memory and does not
+watch it for external changes. If the file is edited by another program, press
+**⌘R** (or **File → Reload from Disk**) to re-read it from disk. When the file on
+disk already matches memory, this is a no-op.
+
+If the in-memory copy has edits that never reached disk (an autosave still
+pending, or a failed write) and reloading would discard them, mdviewer stops and
+asks. **Save a Copy…** writes the current in-memory version to a new file you
+pick (named `<file>-unsaved.md` by default) and then reloads the original from
+disk, so nothing is lost. **Discard & Reload** throws the in-memory edits away
+and takes the disk version. **Cancel** leaves everything as it was.
+
 ## 3. Reading
 
 Documents render as GitHub Flavored Markdown with syntax-highlighted code blocks.
@@ -247,6 +259,7 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 | **⌘G** / **⇧⌘G** | Anywhere, while find is open | Next / previous match |
 | **Esc** | Anywhere | Close the find bar, or the open dialog |
 | **⌘S** | Anywhere | Save now |
+| **⌘R** | Anywhere | Reload the open file from disk |
 | **⌘B** | Anywhere | Show or hide the sidebar |
 | **⌘↵** | Block editor | Save the block |
 | **Esc** | Block editor | Cancel the edit |
@@ -351,7 +364,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 89-check self-test inside the Electron bundle
+npm run selftest       # run the 105-check self-test inside the Electron bundle
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -396,8 +409,8 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
-node --test tests/*.test.js  # 53 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 89 in-browser checks (render, edit, comment, find, wrap)
+node --test tests/*.test.js  # 59 unit + integration tests (pure logic + shipped file)
+bash tools/selftest.sh       # 105 in-browser checks (render, edit, comment, find, wrap, reload)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test
