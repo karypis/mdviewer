@@ -35,49 +35,76 @@ const PDF_OPTS = { printBackground: true, pageSize: 'Letter' };
 const HEADLESS = !!(process.env.MDVIEWER_SELFTEST || process.env.MDVIEWER_E2E ||
   process.env.MDVIEWER_LIFECYCLE || process.env.MDVIEWER_PDFTEST);
 
+// `win` is the most-recently created/focused window: the test runners and the
+// cold-start path use it. `windows` tracks every open window for multi-window
+// support (tab tear-off). Per-window readiness and a queued path live on the
+// BrowserWindow instance as _ready / _pendingPath.
 let win = null;
-let rendererReady = false;
-let pendingPath = null;
+const windows = new Set();
+let pendingPath = null;      // cold-start path (argv/env/Finder-before-ready), consumed once
 let lifecycleStarted = false;
 
+function windowAlive(w) { w = w || win; return w && !w.isDestroyed(); }
+function targetWindow() { return BrowserWindow.getFocusedWindow() || win; }
+
 // Finder "Open With" on macOS arrives as an open-file event (can fire before
-// the app is ready, or later while it is already running).
+// the app is ready, or later while it is already running). While running, the
+// file opens as a new tab in the focused window.
 app.on('open-file', (e, p) => {
   e.preventDefault();
-  pendingPath = path.resolve(p);
-  if (app.isReady()) deliverPendingPath();
+  const rp = path.resolve(p);
+  if (!app.isReady()) { pendingPath = rp; return; }
+  const w = targetWindow();
+  if (windowAlive(w)) {
+    if (w._ready) w.webContents.send('open-path', rp); else w._pendingPath = rp;
+    if (w.isMinimized()) w.restore();
+    w.focus();
+  } else {
+    createWindow(rp);
+  }
 });
 
 // A markdown path passed on the command line (cold start) or via the e2e env.
+// `testFile` is the stable env-derived path for the test runners; `pendingPath`
+// is the mutable delivery slot the renderer-ready handler consumes.
+let testFile = null;
 (function seedPendingPath() {
   const envFile = process.env.MDVIEWER_E2E || process.env.MDVIEWER_VERIFY ||
     process.env.MDVIEWER_LIFECYCLE || process.env.MDVIEWER_PDFTEST;
-  if (envFile && fs.existsSync(envFile)) { pendingPath = path.resolve(envFile); return; }
+  if (envFile && fs.existsSync(envFile)) { pendingPath = path.resolve(envFile); testFile = pendingPath; return; }
   for (const a of process.argv.slice(1)) {
     if (/\.(md|markdown|txt)$/i.test(a) && fs.existsSync(a)) { pendingPath = path.resolve(a); break; }
   }
 })();
 
-function windowAlive() { return win && !win.isDestroyed(); }
-
-// Route a pending path to a live window (reusing it), or open a new one. Never
-// touches a destroyed window.
+// Route the cold-start pending path to a live window, or open a new one. Used by
+// the lifecycle test's open-after-close case. Never touches a destroyed window.
 function deliverPendingPath() {
   if (!pendingPath) return;
   if (windowAlive()) {
-    if (rendererReady) win.webContents.send('open-path', pendingPath);
+    if (win._ready) win.webContents.send('open-path', pendingPath);
+    else win._pendingPath = pendingPath;
     if (win.isMinimized()) win.restore();
     win.focus();
   } else {
-    rendererReady = false;
-    createWindow();
+    const p = pendingPath; pendingPath = null;
+    createWindow(p); // the new window opens exactly this file
   }
 }
 
-ipcMain.on('renderer-ready', () => {
-  rendererReady = true;
-  if (pendingPath && windowAlive()) win.webContents.send('open-path', pendingPath);
+// A window announces it is wired. Deliver its queued path, or the one-time
+// cold-start path (consumed by the first window to become ready).
+ipcMain.on('renderer-ready', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender) || win;
+  if (!w) return;
+  w._ready = true;
+  let p = w._pendingPath; w._pendingPath = null;
+  if (!p && pendingPath) { p = pendingPath; pendingPath = null; }
+  if (p) w.webContents.send('open-path', p);
 });
+
+// Tab tear-off: open a file in a brand-new window.
+ipcMain.on('open-in-new-window', (_e, p) => { createWindow(path.resolve(p)); });
 
 // Native file I/O on behalf of the (sandboxed) renderer.
 ipcMain.handle('read-file', (_e, p) => fs.promises.readFile(p, 'utf8'));
@@ -85,11 +112,12 @@ ipcMain.handle('write-file', (_e, p, data) => fs.promises.writeFile(p, data, 'ut
 
 // Render the current page to a PDF and save it (the @media print stylesheet
 // makes it a clean, light, chrome-free document).
-ipcMain.handle('export-pdf', async (_e, suggestedName) => {
-  if (!windowAlive()) return { error: 'no window' };
+ipcMain.handle('export-pdf', async (e, suggestedName) => {
+  const w = BrowserWindow.fromWebContents(e.sender) || win;
+  if (!windowAlive(w)) return { error: 'no window' };
   try {
-    const data = await withWhiteBackground(await win.webContents.printToPDF(PDF_OPTS));
-    const r = await dialog.showSaveDialog(win, {
+    const data = await withWhiteBackground(await w.webContents.printToPDF(PDF_OPTS));
+    const r = await dialog.showSaveDialog(w, {
       title: 'Export PDF',
       defaultPath: suggestedName || 'document.pdf',
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -101,18 +129,24 @@ ipcMain.handle('export-pdf', async (_e, suggestedName) => {
 });
 
 function buildMenu() {
-  const send = (a) => () => windowAlive() && win.webContents.send('menu', a);
+  const send = (a) => () => { const w = targetWindow(); if (windowAlive(w)) w.webContents.send('menu', a); };
   const fileMenu = {
     label: 'File',
     submenu: [
+      { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createWindow() },
+      { type: 'separator' },
       { label: 'Open File…', accelerator: 'CmdOrCtrl+O', click: send('open-file') },
       { label: 'Open Folder…', accelerator: 'CmdOrCtrl+Shift+O', click: send('open-folder') },
       { type: 'separator' },
       { label: 'Reload from Disk', accelerator: 'CmdOrCtrl+R', click: send('reload-file') },
+      { label: 'Move Tab to New Window', accelerator: 'CmdOrCtrl+Shift+N', click: send('move-tab-new-window') },
       { type: 'separator' },
       { label: 'Export as PDF…', accelerator: 'CmdOrCtrl+P', click: send('export-pdf') },
       { type: 'separator' },
-      process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
+      { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: send('close-tab') },
+      process.platform === 'darwin'
+        ? { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' }
+        : { role: 'quit' },
     ],
   };
   const viewMenu = {
@@ -137,27 +171,32 @@ function queryFromEnv() {
   return {};
 }
 
-function createWindow() {
+function createWindow(openPath) {
   // #ffffff leaves the @page margin transparent; the PDF post-process
   // (withWhiteBackground) then stamps an opaque white rectangle under every page
   // so the margin is white in EVERY renderer (Preview, Acrobat, Chrome, ...).
   // Shown on ready-to-show so the dark UI is already painted (no white flash).
-  win = new BrowserWindow({
+  const w = new BrowserWindow({
     width: 1280, height: 860, show: false, backgroundColor: '#ffffff',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
-  win.on('closed', () => { win = null; rendererReady = false; });
-  if (!HEADLESS) win.once('ready-to-show', () => win.show());
+  w._ready = false;
+  w._pendingPath = openPath || null; // a tear-off window opens exactly this file
+  win = w;
+  windows.add(w);
+  w.on('closed', () => { windows.delete(w); if (win === w) win = windows.values().next().value || null; });
+  if (!HEADLESS) w.once('ready-to-show', () => w.show());
   buildMenu();
-  win.loadFile(HTML, { query: queryFromEnv() });
-  if (process.env.MDVIEWER_SELFTEST) win.webContents.once('did-finish-load', runSelftest);
-  if (process.env.MDVIEWER_E2E) win.webContents.once('did-finish-load', runE2E);
-  if (process.env.MDVIEWER_VERIFY) win.webContents.once('did-finish-load', runVerify);
+  w.loadFile(HTML, { query: queryFromEnv() });
+  if (process.env.MDVIEWER_SELFTEST) w.webContents.once('did-finish-load', runSelftest);
+  if (process.env.MDVIEWER_E2E) w.webContents.once('did-finish-load', runE2E);
+  if (process.env.MDVIEWER_VERIFY) w.webContents.once('did-finish-load', runVerify);
   if (process.env.MDVIEWER_LIFECYCLE && !lifecycleStarted) {
     lifecycleStarted = true;
-    win.webContents.once('did-finish-load', runLifecycleTest);
+    w.webContents.once('did-finish-load', runLifecycleTest);
   }
-  if (process.env.MDVIEWER_PDFTEST) win.webContents.once('did-finish-load', runPdfTest);
+  if (process.env.MDVIEWER_PDFTEST) w.webContents.once('did-finish-load', runPdfTest);
+  return w;
 }
 
 // Render the open file to a PDF (no dialog) and check it is a real, non-trivial
@@ -181,9 +220,9 @@ async function runPdfTest() {
 // destroy the window (app stays alive on macOS), then deliver another open —
 // which must spin up a fresh window instead of touching the destroyed one.
 async function runLifecycleTest() {
-  const file = pendingPath;
+  const file = testFile;
   await poll('window.__mdv && window.__mdv.getSource() ? "1" : ""', 8000);
-  win.destroy(); // 'closed' handler nulls win + rendererReady
+  win.destroy(); // 'closed' handler removes it from the window set and nulls win
   let threw = null;
   try { pendingPath = file; deliverPendingPath(); }
   catch (e) { threw = e; }
@@ -201,7 +240,7 @@ async function runVerify() {
   const loaded = await poll('window.__mdv && window.__mdv.getSource() ? "1" : ""', 8000);
   if (!loaded) { console.log('VERIFY FAIL: file did not load'); return app.exit(1); }
   const stats = await win.webContents.executeJavaScript(`(() => ({
-    filename: document.getElementById('filename').textContent,
+    filename: window.__mdv.state.fileName,
     blocksRendered: document.querySelectorAll('#doc .block').length,
     commentCards: document.querySelectorAll('.comment-card').length,
     parsedComments: window.__mdv.state.comments.length,
@@ -220,8 +259,10 @@ async function runVerify() {
 async function poll(expr, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const v = await win.webContents.executeJavaScript(expr).catch(() => null);
-    if (v) return v;
+    if (windowAlive()) {
+      const v = await win.webContents.executeJavaScript(expr).catch(() => null);
+      if (v) return v;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   return null;
@@ -236,10 +277,10 @@ async function runSelftest() {
 // Open a real file (handed in via env), append a marker, autosave through the
 // fs bridge, and confirm the bytes hit disk.
 async function runE2E() {
-  const file = pendingPath;
+  const file = testFile;
   const haveApi = await poll('window.electronAPI ? "1" : ""', 5000);
   if (!haveApi) { console.log('E2E FAIL: bridge missing'); return app.exit(1); }
-  if (pendingPath) win.webContents.send('open-path', pendingPath);
+  if (windowAlive() && file) win.webContents.send('open-path', file); // dedup makes a second open safe
   const loaded = await poll('window.__mdv && window.__mdv.getSource() ? "1" : ""', 8000);
   if (!loaded) { console.log('E2E FAIL: file did not load'); return app.exit(1); }
   await win.webContents.executeJavaScript(`(async () => {
@@ -251,7 +292,7 @@ async function runE2E() {
   let ok = false, openedName = '';
   try {
     ok = fs.readFileSync(file, 'utf8').includes('E2E_MARKER_APPENDED');
-    openedName = await win.webContents.executeJavaScript('document.getElementById("filename").textContent');
+    openedName = await win.webContents.executeJavaScript('window.__mdv.state.fileName');
   } catch (e) { console.log('E2E read error: ' + e); }
   console.log('E2E ' + (ok ? 'PASS' : 'FAIL') +
     ' (opened "' + openedName + '", autosave wrote marker to disk via fs bridge=' + ok + ')');

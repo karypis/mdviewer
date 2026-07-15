@@ -48,24 +48,40 @@ Drag the thin bar between any two panels to resize them. The sidebar clamps to
 its prose reflows to whatever width is left. Both widths persist across sessions
 in `localStorage` under the key `mdviewer.layout`.
 
+A **tab strip** sits between the toolbar and the panels, one tab per open file.
+It is hidden until you open something.
+
 Hide the sidebar entirely with the **☰** toolbar button or **⌘B**.
 
 The toolbar's right end shows the save indicator: **Saved**, **Saving…**,
 **Unsaved**, or **Save error**.
 
-## 2. Opening files
+## 2. Opening files and tabs
 
 **Open File** picks a single Markdown file. **Open Folder** opens a folder as a
 collapsible file tree in the sidebar; folders load their children the first time
 you expand them, so a deep tree costs nothing until you click into it.
 
+Every file you open becomes its own **tab** in the strip below the toolbar. A
+second Open File, or clicking another file in the tree, adds a tab rather than
+replacing what you were reading. Opening a file that is already open just focuses
+its tab. Click a tab to switch to it; **Ctrl+Tab** and **Ctrl+Shift+Tab** cycle
+through them. Each tab keeps its own scroll position, unsaved edits, and find
+state, and autosaves independently; an amber dot marks a tab with unsaved bytes.
+
+Close a tab with its **×**, a middle-click, or **⌘W**. Closing flushes any
+unsaved bytes to disk first, so nothing is lost. Closing the last tab returns to
+the empty state.
+
+**Separate windows.** Right-click a tab and choose **Move to New Window** (or
+**File → Move Tab to New Window**, **⌘⇧N**) to pull that file into its own OS
+window, so you can read two files side by side. **File → New Window** (**⌘N**)
+opens a fresh empty window. This is a desktop-app capability; in a plain browser
+it falls back to opening a second browser window with that file.
+
 The picker starts in the last folder you opened, remembered across sessions. Open
 `~/agents` once with **Open Folder** and every later picker starts there. Browsers
 do not let a web app hardcode an absolute path, so this one-time pick is required.
-
-On launch the app offers **Reopen last**, which restores your previous file or
-folder from the handle it stored in IndexedDB. The browser may re-prompt for
-permission.
 
 In the desktop app you can also double-click a `.md` file in Finder, or use
 right-click → **Open With** → mdviewer. Files opened this way read and write
@@ -261,6 +277,11 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 | **⌘S** | Anywhere | Save now |
 | **⌘R** | Anywhere | Reload the open file from disk |
 | **⌘B** | Anywhere | Show or hide the sidebar |
+| **⌘W** | Anywhere | Close the active tab |
+| **Ctrl+Tab** / **Ctrl+⇧Tab** | Anywhere | Next / previous tab |
+| **⌘N** | Desktop app | New window |
+| **⌘⇧N** | Desktop app | Move the active tab to a new window |
+| **⌘⇧W** | Desktop app | Close the window |
 | **⌘↵** | Block editor | Save the block |
 | **Esc** | Block editor | Cancel the edit |
 | **Tab** | Block editor | Insert two spaces |
@@ -364,7 +385,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 105-check self-test inside the Electron bundle
+npm run selftest       # run the 118-check self-test inside the Electron bundle
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -410,7 +431,7 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
 node --test tests/*.test.js  # 59 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 105 in-browser checks (render, edit, comment, find, wrap, reload)
+bash tools/selftest.sh       # 118 in-browser checks (render, edit, comment, find, wrap, reload, tabs)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test

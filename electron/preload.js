@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeFile: (p, data) => ipcRenderer.invoke('write-file', p, data),
   // export the current page to a PDF file (save dialog handled in main)
   exportPDF: (suggestedName) => ipcRenderer.invoke('export-pdf', suggestedName),
+  // renderer -> main: open a file in a brand-new window (tab tear-off)
+  openInNewWindow: (p) => ipcRenderer.send('open-in-new-window', p),
 });

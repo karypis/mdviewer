@@ -12,8 +12,6 @@
     <button id="toggleSidebar" title="Show/hide sidebar (⌘B)">☰</button>
     <button id="openFile">Open File</button>
     <button id="openFolder">Open Folder</button>
-    <button id="reopenLast" style="display:none"></button>
-    <span class="filename" id="filename"></span>
     <span class="spacer"></span>
     <button id="exportPdf" style="display:none">PDF</button>
     <button id="clearComments" style="display:none">Clear Comments</button>
@@ -21,6 +19,8 @@
     <button id="helpBtn" title="Help">?</button>
     <span id="saveState" class="saved"><span class="dot"></span><span class="label"></span></span>
   </div>
+
+  <div id="tabbar" style="display:none"></div>
 
   <div id="shell">
     <div id="sidebar"></div>
@@ -127,8 +127,13 @@
       <h3>Open a file</h3>
       <p><b>Open File</b> picks a single Markdown file; <b>Open Folder</b> opens a
         collapsible file tree (click a folder to expand it; children load on demand).
-        The picker starts in the last folder you used. <b>Reopen last</b> on launch
-        reopens your previous file/folder. Chromium browsers only.</p>
+        The picker starts in the last folder you used. Chromium browsers only.</p>
+      <h3>Tabs</h3>
+      <p>Every file you open gets its own tab; opening another does not replace the
+        one you were reading. Click a tab to switch, or cycle with <b>Ctrl+Tab</b>.
+        Close a tab with its <b>×</b> or <b>⌘W</b>. Right-click a tab and choose
+        <b>Move to New Window</b> (<b>⌘⇧N</b>) to read two files side by side;
+        <b>File &rarr; New Window</b> (<b>⌘N</b>) opens an empty window.</p>
       <h3>Read</h3>
       <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
         Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>. Drag the thin

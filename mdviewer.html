@@ -77,7 +77,6 @@ body {
   cursor: pointer;
 }
 #toolbar button:hover { border-color: var(--accent); }
-#toolbar .filename { font-weight: 600; color: var(--text); }
 #toolbar .spacer { flex: 1; }
 #saveState { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 #saveState .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
@@ -86,6 +85,72 @@ body {
 #saveState.dirty .dot { background: var(--warn); }
 #saveState.error .dot { background: var(--danger); }
 #saveState.error { color: var(--danger); }
+
+/* ---- tab bar ---- */
+#tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 0 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+#tabbar .tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 7px 8px 7px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-top-left-radius: 7px;
+  border-top-right-radius: 7px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+#tabbar .tab:hover { color: var(--text); }
+#tabbar .tab.active {
+  background: var(--surface2);
+  color: var(--text);
+  border-color: var(--accent);
+}
+#tabbar .tab-title { overflow: hidden; text-overflow: ellipsis; }
+#tabbar .tab-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: transparent; flex: 0 0 auto;
+}
+#tabbar .tab.dirty .tab-dot { background: var(--warn); }
+#tabbar .tab-close {
+  background: none; border: none; color: inherit;
+  font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer;
+  opacity: 0.5; border-radius: 4px;
+}
+#tabbar .tab-close:hover { opacity: 1; background: var(--border); }
+/* the dirty dot gives way to the close button on hover */
+#tabbar .tab:hover .tab-dot { display: none; }
+
+/* right-click tab menu */
+.ctx-menu {
+  position: fixed;
+  z-index: 200;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 170px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+.ctx-menu .ctx-item { padding: 7px 12px; border-radius: 5px; cursor: pointer; color: var(--text); }
+.ctx-menu .ctx-item:hover { background: var(--accent); color: #fff; }
 
 /* ---- shell ---- */
 #shell { display: flex; flex: 1 1 auto; min-height: 0; }
@@ -374,7 +439,7 @@ body {
     height: auto !important; overflow: visible !important;
     background: #fff !important; color: #1a1a1a !important;
   }
-  #toolbar, #sidebar, #margin, #composer, #commentBtn, #toast,
+  #toolbar, #tabbar, #sidebar, #margin, #composer, #commentBtn, #toast,
   #searchbar, .gutter { display: none !important; }
   #shell { display: block !important; height: auto !important; min-height: 0 !important; }
   #docwrap { overflow: visible !important; height: auto !important; }
@@ -432,8 +497,6 @@ body {
     <button id="toggleSidebar" title="Show/hide sidebar (⌘B)">☰</button>
     <button id="openFile">Open File</button>
     <button id="openFolder">Open Folder</button>
-    <button id="reopenLast" style="display:none"></button>
-    <span class="filename" id="filename"></span>
     <span class="spacer"></span>
     <button id="exportPdf" style="display:none">PDF</button>
     <button id="clearComments" style="display:none">Clear Comments</button>
@@ -441,6 +504,8 @@ body {
     <button id="helpBtn" title="Help">?</button>
     <span id="saveState" class="saved"><span class="dot"></span><span class="label"></span></span>
   </div>
+
+  <div id="tabbar" style="display:none"></div>
 
   <div id="shell">
     <div id="sidebar"></div>
@@ -547,8 +612,13 @@ body {
       <h3>Open a file</h3>
       <p><b>Open File</b> picks a single Markdown file; <b>Open Folder</b> opens a
         collapsible file tree (click a folder to expand it; children load on demand).
-        The picker starts in the last folder you used. <b>Reopen last</b> on launch
-        reopens your previous file/folder. Chromium browsers only.</p>
+        The picker starts in the last folder you used. Chromium browsers only.</p>
+      <h3>Tabs</h3>
+      <p>Every file you open gets its own tab; opening another does not replace the
+        one you were reading. Click a tab to switch, or cycle with <b>Ctrl+Tab</b>.
+        Close a tab with its <b>×</b> or <b>⌘W</b>. Right-click a tab and choose
+        <b>Move to New Window</b> (<b>⌘⇧N</b>) to read two files side by side;
+        <b>File &rarr; New Window</b> (<b>⌘N</b>) opens an empty window.</p>
       <h3>Read</h3>
       <p>Documents render as GitHub Flavored Markdown with syntax-highlighted code.
         Toggle the file/outline sidebar with <b>☰</b> or <b>⌘B</b>. Drag the thin
@@ -2290,41 +2360,72 @@ return He}()
   };
   var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 };
 
-  var state = {
-    fileHandle: null,
-    dirHandle: null,
+  // Window-level state: shared across every open tab in this window.
+  var app = {
+    dirHandle: null,      // the open folder (its tree fills the sidebar), or null
     startDir: null,       // directory handle used as the picker's startIn
     settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
-    detectedWidth: 0,     // hard-wrap column inferred from the loaded file
-    source: '',
-    diskSource: '',       // bytes last read from / written to disk (the clean baseline)
-    blocks: [],
-    comments: [],
-    fileName: '',
-    editing: null,        // index of block being edited, or null
-    escaping: false,      // set while cancelling an edit
-    saveTimer: null,
-    activeComment: null,  // id of focused comment
-    composerMode: null,   // {type:'new', pos} or {type:'edit', comment}
-    search: { open: false, query: '', matches: [], current: -1 },
+    tabs: [],             // one document per open file
+    active: -1,           // index into tabs of the visible document, or -1 (none)
   };
+
+  // A fresh per-tab document. Everything that belongs to one open file lives
+  // here, so tabs never bleed into one another: source, disk baseline, parsed
+  // blocks/comments, the open editor, the pending autosave, find state, and the
+  // scroll position to restore when this tab is shown again.
+  function newDoc() {
+    return {
+      fileHandle: null,
+      detectedWidth: 0,   // hard-wrap column inferred from the loaded file
+      source: '',
+      diskSource: '',     // bytes last read from / written to disk (the clean baseline)
+      blocks: [],
+      comments: [],
+      fileName: '',
+      saveState: 'saved', // saved | saving | dirty | error, restored on tab switch
+      saveMsg: '',
+      editing: null,      // index of block being edited, or null
+      escaping: false,    // set while cancelling an edit
+      saveTimer: null,
+      activeComment: null,// id of focused comment
+      composerMode: null, // {type:'new', pos} or {type:'edit', comment}
+      pendingSel: null,
+      scrollTop: 0,       // document scroll to restore when this tab is shown
+      search: { open: false, query: '', matches: [], current: -1 },
+      _ranges: {},
+    };
+  }
+
+  // `state` always points at the active tab's document. Reassigned by
+  // activateTab, so every existing `state.foo` reference reads/writes the
+  // visible file. A placeholder until the first file opens.
+  var state = newDoc();
 
   // The effective hard-wrap width: 'auto' uses the width detected from the
   // file; a number forces it; 0 (or unset) disables re-wrapping on save.
   function effectiveWrap() {
-    var w = state.settings.wrap;
+    var w = app.settings.wrap;
     if (w == null || w === 'auto') return state.detectedWidth || 0;
     var n = parseInt(w, 10);
     return isFinite(n) && n > 0 ? n : 0;
   }
 
   // ---- save state indicator --------------------------------------------
-  function setSaveState(s, msg) {
+  // Record the save state on `doc`, paint the toolbar when it is the visible
+  // tab, and refresh every tab's unsaved dot. Restored when a tab is reshown.
+  function setDocSaveState(doc, s, msg) {
+    doc.saveState = s;
+    doc.saveMsg = msg || '';
+    if (doc === state) paintSaveState(s, msg);
+    refreshTabsDirty();
+  }
+  function paintSaveState(s, msg) {
     var el = $('saveState');
     el.className = s;
     var labels = { saved: 'Saved', saving: 'Saving…', dirty: 'Unsaved', error: msg || 'Save error' };
     el.querySelector('.label').textContent = labels[s] || '';
   }
+  function setSaveState(s, msg) { setDocSaveState(state, s, msg); }
 
   function toast(msg) {
     toastEl.textContent = msg;
@@ -2332,11 +2433,194 @@ return He}()
     setTimeout(function () { toastEl.classList.remove('show'); }, 4000);
   }
 
+  // ---- tabs -------------------------------------------------------------
+  // A stable identity for a handle, so opening the same file twice focuses the
+  // existing tab instead of duplicating it. Electron handles carry the absolute
+  // path; browser handles fall back to the file name.
+  function docKey(h) { return h ? (h._electronPath || h.name || null) : null; }
+
+  // On launch, a browser window opened via "Move to New Window" carries a
+  // ?tearoff=<id> pointing at a file handle stashed in IndexedDB. Adopt it.
+  async function handleTearoff() {
+    var m = location.search.match(/[?&]tearoff=([^&]+)/);
+    if (!m) return;
+    try {
+      var h = await idbGet('tearoff', m[1]);
+      if (!h) return;
+      if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') {
+        if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return;
+      }
+      await openInTab(h);
+    } catch (e) { /* ignore a stale or unreadable handoff */ }
+  }
+
+  function isDocDirty(doc) { return doc.source !== doc.diskSource; }
+
+  // Open a handle in a tab: focus it if already open, else append a new tab,
+  // make it active, and load the file into it.
+  async function openInTab(handle) {
+    var key = docKey(handle);
+    if (key != null) {
+      for (var i = 0; i < app.tabs.length; i++) {
+        if (docKey(app.tabs[i].fileHandle) === key) { activateTab(i); return; }
+      }
+    }
+    var doc = newDoc();
+    doc.fileHandle = handle;
+    app.tabs.push(doc);
+    activateTab(app.tabs.length - 1, true); // repoint state; loadHandle renders
+    await loadHandle(handle);
+    renderTabs();
+  }
+
+  // Make tab `i` the visible one. Commits an open editor on the tab we leave (so
+  // typed text is never lost) and remembers its scroll, then repoints `state`,
+  // renders, and restores the target tab's scroll. `skipRender` is set when the
+  // caller (a fresh file load) will render the document itself.
+  function activateTab(i, skipRender) {
+    if (i < 0 || i >= app.tabs.length) return;
+    if (app.active >= 0 && app.active !== i && app.tabs[app.active]) {
+      if (state.editing != null) commitEdit(state.editing);
+      app.tabs[app.active].scrollTop = docwrap ? docwrap.scrollTop : 0;
+    }
+    app.active = i;
+    state = app.tabs[i];
+    renderTabs();
+    if (skipRender) return;
+    paintSaveState(state.saveState, state.saveMsg);
+    renderAll();
+    if (docwrap) { docwrap.scrollTop = state.scrollTop; marginEl.scrollTop = state.scrollTop; }
+  }
+
+  // Close tab `i`. Flushes unsaved bytes to disk first so closing never loses
+  // work, then activates a neighbor (or shows the empty state if it was last).
+  async function closeTab(i) {
+    var doc = app.tabs[i];
+    if (!doc) return;
+    clearTimeout(doc.saveTimer);
+    if (doc.fileHandle && isDocDirty(doc)) await writeDoc(doc);
+    app.tabs.splice(i, 1);
+    if (app.tabs.length === 0) {
+      app.active = -1;
+      state = newDoc();
+      paintSaveState('saved');
+      renderAll();
+      renderTabs();
+      return;
+    }
+    var next = i < app.active ? app.active - 1 : Math.min(app.active, app.tabs.length - 1);
+    app.active = -1; // closed tab is gone; skip activateTab's leave-handling
+    activateTab(next);
+  }
+
+  function closeActiveTab() { if (app.active >= 0) closeTab(app.active); }
+  function stepTab(dir) {
+    if (app.tabs.length < 2) return;
+    activateTab((app.active + dir + app.tabs.length) % app.tabs.length);
+  }
+
+  // Rebuild the tab strip. Hidden when nothing is open.
+  function renderTabs() {
+    var bar = $('tabbar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    bar.style.display = app.tabs.length ? 'flex' : 'none';
+    for (var i = 0; i < app.tabs.length; i++) {
+      bar.appendChild(buildTab(app.tabs[i], i));
+    }
+  }
+  function buildTab(doc, i) {
+    var tab = document.createElement('div');
+    tab.className = 'tab' + (i === app.active ? ' active' : '') + (isDocDirty(doc) ? ' dirty' : '');
+    tab.title = doc.fileName || 'Untitled';
+    var title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = doc.fileName || 'Untitled';
+    var dot = document.createElement('span');
+    dot.className = 'tab-dot';
+    var close = document.createElement('button');
+    close.className = 'tab-close';
+    close.textContent = '×';
+    close.title = 'Close tab (⌘W)';
+    close.addEventListener('click', function (e) { e.stopPropagation(); closeTab(i); });
+    tab.appendChild(dot);
+    tab.appendChild(title);
+    tab.appendChild(close);
+    tab.addEventListener('click', function () { activateTab(i); });
+    tab.addEventListener('auxclick', function (e) { if (e.button === 1) { e.preventDefault(); closeTab(i); } });
+    tab.addEventListener('contextmenu', function (e) { e.preventDefault(); showTabMenu(e.clientX, e.clientY, i); });
+    return tab;
+  }
+  function refreshTabsDirty() {
+    var bar = $('tabbar');
+    if (!bar) return;
+    var els = bar.querySelectorAll('.tab');
+    for (var i = 0; i < els.length && i < app.tabs.length; i++) {
+      els[i].classList.toggle('dirty', isDocDirty(app.tabs[i]));
+    }
+  }
+
+  // Right-click tab menu: move to a new window, or close.
+  function showTabMenu(x, y, i) {
+    hideTabMenu();
+    var menu = document.createElement('div');
+    menu.id = 'tabMenu';
+    menu.className = 'ctx-menu';
+    var items = [
+      ['Move to New Window', function () { moveTabToNewWindow(i); }],
+      ['Close', function () { closeTab(i); }],
+      ['Close Others', function () { closeOtherTabs(i); }],
+    ];
+    items.forEach(function (it) {
+      var row = document.createElement('div');
+      row.className = 'ctx-item';
+      row.textContent = it[0];
+      row.addEventListener('click', function () { hideTabMenu(); it[1](); });
+      menu.appendChild(row);
+    });
+    document.body.appendChild(menu);
+    menu.style.left = Math.min(x, window.innerWidth - menu.offsetWidth - 8) + 'px';
+    menu.style.top = y + 'px';
+    setTimeout(function () { document.addEventListener('mousedown', hideTabMenu, { once: true }); }, 0);
+  }
+  function hideTabMenu() { var m = $('tabMenu'); if (m) m.remove(); }
+
+  async function closeOtherTabs(keep) {
+    var keepDoc = app.tabs[keep];
+    for (var i = app.tabs.length - 1; i >= 0; i--) {
+      if (app.tabs[i] !== keepDoc) { app.active = app.tabs.indexOf(keepDoc); await closeTab(i); }
+    }
+  }
+
+  // Move a tab into its own OS window. In Electron the main process spawns a
+  // real window for the file; in the browser we open a second app window and
+  // hand it the file handle through IndexedDB. Either way the source tab closes.
+  async function moveTabToNewWindow(i) {
+    var doc = app.tabs[i];
+    if (!doc || !doc.fileHandle) { toast('Nothing to move'); return; }
+    clearTimeout(doc.saveTimer);
+    if (isDocDirty(doc)) await writeDoc(doc); // the new window reads from disk
+    if (window.electronAPI && window.electronAPI.openInNewWindow && doc.fileHandle._electronPath) {
+      window.electronAPI.openInNewWindow(doc.fileHandle._electronPath);
+      closeTab(i);
+      return;
+    }
+    if (window.showOpenFilePicker) { // browser: pass the handle via IndexedDB
+      try {
+        var id = 'tear-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+        await idbPut('tearoff', id, doc.fileHandle);
+        var w = window.open(location.pathname + '?tearoff=' + id, '_blank');
+        if (w) { closeTab(i); return; }
+      } catch (e) { /* fall through */ }
+    }
+    toast('Move to a new window needs the desktop app');
+  }
+
   // ---- file access ------------------------------------------------------
   // The picker's starting directory: the last folder opened (persisted), else
   // the OS Documents folder. Browsers do not allow an arbitrary absolute path,
   // so the default becomes ~/agents once you open it once.
-  function pickerStart() { return state.startDir || 'documents'; }
+  function pickerStart() { return app.startDir || 'documents'; }
 
   // Run a picker with startIn = pickerStart(), retrying from a safe default if
   // a persisted handle has gone stale. Returns null if the user cancels.
@@ -2357,11 +2641,7 @@ return He}()
         types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'], 'text/plain': ['.txt'] } }],
       });
       if (!picked) return;
-      var h = picked[0];
-      state.fileHandle = h;
-      state.dirHandle = null;
-      await loadHandle(h);
-      await persistLast(h, null);
+      await openInTab(picked[0]);
     } catch (e) { if (e.name !== 'AbortError') toast('Open failed: ' + e.message); }
   }
 
@@ -2369,15 +2649,14 @@ return He}()
     try {
       var dir = await runPicker(window.showDirectoryPicker.bind(window));
       if (!dir) return;
-      state.dirHandle = dir;
+      app.dirHandle = dir;
       setStartDir(dir);
-      await persistLast(null, dir);
       await buildTree(dir);
     } catch (e) { if (e.name !== 'AbortError') toast('Open folder failed: ' + e.message); }
   }
 
   function setStartDir(dirH) {
-    state.startDir = dirH;
+    app.startDir = dirH;
     persistStartDir(dirH);
   }
 
@@ -2410,16 +2689,13 @@ return He}()
   }
   async function openElectronPath(path) {
     try {
-      state.fileHandle = electronFileHandle(path);
-      state.dirHandle = null;
-      await loadHandle(state.fileHandle);
+      await openInTab(electronFileHandle(path));
     } catch (e) { toast('Open failed: ' + e.message); }
   }
 
   async function loadHandle(h) {
     var file = await h.getFile();
-    state.fileName = h.name;
-    $('filename').textContent = h.name;
+    state.fileName = h.name; // shown on the tab
     applyLoadedText(await file.text());
   }
 
@@ -2432,31 +2708,38 @@ return He}()
     setSource(text);
     state.diskSource = text;   // clean baseline: memory == disk
     setSaveState('saved');
-    if (!state.dirHandle) renderSidebarOutline();
+    if (!app.dirHandle) renderSidebarOutline();
   }
 
-  async function writeFile() {
-    if (!state.fileHandle) return;
+  // Saving is bound to an explicit doc, never the global `state`. A queued
+  // autosave must write the file it was scheduled for even if the user has since
+  // switched tabs (which repoints `state` at a different document).
+  async function writeDoc(doc) {
+    if (!doc.fileHandle) return;
     try {
-      setSaveState('saving');
-      var bytes = state.source;              // snapshot: source may change mid-write
-      var w = await state.fileHandle.createWritable();
+      setDocSaveState(doc, 'saving');
+      var bytes = doc.source;                // snapshot: source may change mid-write
+      var w = await doc.fileHandle.createWritable();
       await w.write(bytes);
       await w.close();
-      state.diskSource = bytes;              // these bytes are now the clean baseline
-      setSaveState('saved');
+      doc.diskSource = bytes;                // these bytes are now the clean baseline
+      setDocSaveState(doc, 'saved');
     } catch (e) {
-      setSaveState('error', 'Save failed');
+      setDocSaveState(doc, 'error', 'Save failed');
       toast('Save failed: ' + e.message);
     }
   }
-
-  function scheduleSave(immediate) {
-    setSaveState('dirty');
-    clearTimeout(state.saveTimer);
-    if (immediate) { writeFile(); return; }
-    state.saveTimer = setTimeout(writeFile, 500);
+  function scheduleSaveDoc(doc, immediate) {
+    setDocSaveState(doc, 'dirty');
+    clearTimeout(doc.saveTimer);
+    if (immediate) { writeDoc(doc); return; }
+    doc.saveTimer = setTimeout(function () { writeDoc(doc); }, 500);
   }
+
+  // Thin wrappers over the active document, so the many existing call sites keep
+  // working unchanged.
+  function writeFile() { return writeDoc(state); }
+  function scheduleSave(immediate) { scheduleSaveDoc(state, immediate); }
 
   // Re-read the current file from disk, discarding the in-memory copy, to pick
   // up an external change (the app does not watch the file). Reloading destroys
@@ -2500,7 +2783,7 @@ return He}()
     try {
       var opts = { suggestedName: base + '-unsaved' + ext,
         types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }] };
-      if (state.startDir) opts.startIn = state.startDir;
+      if (app.startDir) opts.startIn = app.startDir;
       var h = await window.showSaveFilePicker(opts);
       var w = await h.createWritable();
       await w.write(state.source);
@@ -2513,7 +2796,7 @@ return He}()
     }
   }
 
-  // ---- reopen-last via IndexedDB ---------------------------------------
+  // ---- IndexedDB (picker start dir; browser tab tear-off handoff) ------
   function idb() {
     return new Promise(function (res, rej) {
       var r = indexedDB.open('mdviewer', 1);
@@ -2522,22 +2805,19 @@ return He}()
       r.onerror = function () { rej(r.error); };
     });
   }
-  async function persistLast(fileH, dirH) {
-    try {
-      var db = await idb();
-      var tx = db.transaction('h', 'readwrite');
-      tx.objectStore('h').put({ fileH: fileH, dirH: dirH, name: (fileH || dirH).name }, 'last');
-    } catch (e) { /* non-fatal */ }
+  // Generic put/get on the single 'h' store, keyed by namespaced string. Used
+  // to hand a file handle to a browser tear-off window ('tearoff:<id>').
+  async function idbPut(ns, id, val) {
+    var db = await idb();
+    db.transaction('h', 'readwrite').objectStore('h').put(val, ns + ':' + id);
   }
-  async function getLast() {
-    try {
-      var db = await idb();
-      return await new Promise(function (res) {
-        var g = db.transaction('h').objectStore('h').get('last');
-        g.onsuccess = function () { res(g.result || null); };
-        g.onerror = function () { res(null); };
-      });
-    } catch (e) { return null; }
+  async function idbGet(ns, id) {
+    var db = await idb();
+    return await new Promise(function (res) {
+      var g = db.transaction('h').objectStore('h').get(ns + ':' + id);
+      g.onsuccess = function () { res(g.result || null); };
+      g.onerror = function () { res(null); };
+    });
   }
   async function persistStartDir(dirH) {
     try {
@@ -2555,24 +2835,6 @@ return He}()
       });
     } catch (e) { return null; }
   }
-  async function reopenLast() {
-    var last = await getLast();
-    if (!last) return;
-    var h = last.fileH || last.dirH;
-    if (!h) return;
-    if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') {
-      if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return;
-    }
-    if (last.fileH) {
-      state.fileHandle = last.fileH; state.dirHandle = null;
-      await loadHandle(last.fileH);
-    } else {
-      state.dirHandle = last.dirH;
-      setStartDir(last.dirH);
-      await buildTree(last.dirH);
-    }
-  }
-
   // ---- collapsible, lazy file tree (folder mode) -----------------------
   async function buildTree(dir) {
     sidebar.innerHTML = '';
@@ -2635,8 +2897,7 @@ return He}()
       var prev = sidebar.querySelector('.tree-item.active');
       if (prev) prev.classList.remove('active');
       f.classList.add('active');
-      state.fileHandle = entry;
-      await loadHandle(entry);
+      await openInTab(entry); // each opened file becomes its own tab
     });
     container.appendChild(f);
   }
@@ -2679,7 +2940,7 @@ return He}()
   }
   function relex() {
     state.blocks = MDCore.lexBlocks(state.source);
-    state.comments = MDCore.parseComments(state.source, state.settings.responder);
+    state.comments = MDCore.parseComments(state.source, app.settings.responder);
     for (var i = 0; i < state.comments.length; i++) state.comments[i].id = i;
   }
 
@@ -2690,7 +2951,7 @@ return He}()
     var scroll = docwrap.scrollTop; // preserve scroll across full re-render
     renderDocument();
     renderComments();
-    if (!state.dirHandle) renderSidebarOutline();
+    if (!app.dirHandle) renderSidebarOutline();
     $('clearComments').style.display = state.comments.length ? 'inline-block' : 'none';
     $('exportPdf').style.display = state.source ? 'inline-block' : 'none';
     docwrap.scrollTop = scroll;
@@ -2820,7 +3081,7 @@ return He}()
     if (c.claude) {
       var cl = document.createElement('div');
       cl.className = 'claude';
-      var ct = document.createElement('span'); ct.className = 'tag'; ct.textContent = state.settings.responder;
+      var ct = document.createElement('span'); ct.className = 'tag'; ct.textContent = app.settings.responder;
       var cb = document.createElement('div'); cb.className = 'body'; cb.textContent = c.claude;
       cl.appendChild(ct); cl.appendChild(cb); card.appendChild(cl);
     }
@@ -2919,7 +3180,7 @@ return He}()
     var pos = MDCore.locateInsertOffset(block.raw, block.start, ps.prefix, ps.text);
     if (pos == null) pos = block.end - (block.raw.match(/\n*$/)[0].length); // fallback: end of content
     commentBtn.classList.remove('open');
-    openComposer({ type: 'new', pos: pos }, '', state.settings.prefix, ps.rect);
+    openComposer({ type: 'new', pos: pos }, '', app.settings.prefix, ps.rect);
   }
 
   function editComment(c) {
@@ -2969,16 +3230,16 @@ return He}()
       var raw = localStorage.getItem('mdviewer.settings');
       if (raw) {
         var s = JSON.parse(raw);
-        if (s.prefix) state.settings.prefix = s.prefix;
-        if (s.responder) state.settings.responder = s.responder;
-        if (s.wrap != null) state.settings.wrap = s.wrap;
-        if (s.font && FONTS[s.font]) state.settings.font = s.font;
-        if (s.size != null) state.settings.size = cleanSize(s.size);
+        if (s.prefix) app.settings.prefix = s.prefix;
+        if (s.responder) app.settings.responder = s.responder;
+        if (s.wrap != null) app.settings.wrap = s.wrap;
+        if (s.font && FONTS[s.font]) app.settings.font = s.font;
+        if (s.size != null) app.settings.size = cleanSize(s.size);
       }
     } catch (e) { /* defaults */ }
   }
   function persistSettings() {
-    try { localStorage.setItem('mdviewer.settings', JSON.stringify(state.settings)); }
+    try { localStorage.setItem('mdviewer.settings', JSON.stringify(app.settings)); }
     catch (e) { /* non-fatal */ }
   }
   // Tags are uppercase letters/digits; responder allows letters/digits/-.
@@ -3003,8 +3264,8 @@ return He}()
   // scaled so they follow the base size.
   function applyAppearance() {
     var root = document.documentElement;
-    root.style.setProperty('--doc-font', FONTS[state.settings.font] || FONTS.system);
-    root.style.setProperty('--doc-size', cleanSize(state.settings.size) + 'px');
+    root.style.setProperty('--doc-font', FONTS[app.settings.font] || FONTS.system);
+    root.style.setProperty('--doc-size', cleanSize(app.settings.size) + 'px');
   }
 
   // Build the composer's variant dropdown from the configured prefix.
@@ -3012,7 +3273,7 @@ return He}()
     var sel = composer.querySelector('select');
     sel.innerHTML = '';
     for (var i = 0; i < KINDS.length; i++) {
-      var tag = state.settings.prefix + KINDS[i];
+      var tag = app.settings.prefix + KINDS[i];
       var opt = document.createElement('option');
       opt.value = tag; opt.textContent = tag;
       sel.appendChild(opt);
@@ -3020,24 +3281,24 @@ return He}()
   }
 
   function openSettings() {
-    $('setFont').value = FONTS[state.settings.font] ? state.settings.font : 'system';
-    $('setSize').value = cleanSize(state.settings.size);
-    $('setPrefix').value = state.settings.prefix;
-    $('setResponder').value = state.settings.responder;
-    $('setWrap').value = state.settings.wrap === 'auto' ? '' : state.settings.wrap;
-    $('prefixPreview').textContent = state.settings.prefix;
-    $('respPreview').textContent = state.settings.responder;
+    $('setFont').value = FONTS[app.settings.font] ? app.settings.font : 'system';
+    $('setSize').value = cleanSize(app.settings.size);
+    $('setPrefix').value = app.settings.prefix;
+    $('setResponder').value = app.settings.responder;
+    $('setWrap').value = app.settings.wrap === 'auto' ? '' : app.settings.wrap;
+    $('prefixPreview').textContent = app.settings.prefix;
+    $('respPreview').textContent = app.settings.responder;
     showModal('settings');
     $('setFont').focus();
   }
   function saveSettings() {
     var prefix = cleanPrefix($('setPrefix').value) || DEFAULT_SETTINGS.prefix;
     var responder = cleanResponder($('setResponder').value) || DEFAULT_SETTINGS.responder;
-    state.settings.prefix = prefix;
-    state.settings.responder = responder;
-    state.settings.wrap = cleanWrap($('setWrap').value);
-    state.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
-    state.settings.size = cleanSize($('setSize').value);
+    app.settings.prefix = prefix;
+    app.settings.responder = responder;
+    app.settings.wrap = cleanWrap($('setWrap').value);
+    app.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
+    app.settings.size = cleanSize($('setSize').value);
     persistSettings();
     applyAppearance();
     populateVariants();
@@ -3062,7 +3323,7 @@ return He}()
     var sel = composer.querySelector('select');
     // Editing a comment with a foreign prefix (e.g. a collaborator's "AB-FIX"):
     // make sure its exact tag is selectable so saving preserves it.
-    var want = tag || state.settings.prefix;
+    var want = tag || app.settings.prefix;
     if (want && !Array.prototype.some.call(sel.options, function (o) { return o.value === want; })) {
       var opt = document.createElement('option');
       opt.value = want; opt.textContent = want; sel.insertBefore(opt, sel.firstChild);
@@ -3424,20 +3685,15 @@ return He}()
       else if (mod && e.key === 's') { e.preventDefault(); writeFile(); }
       else if (mod && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
       else if (mod && (e.key === 'r' || e.key === 'R') && !e.shiftKey) { e.preventDefault(); reloadFromDisk(); }
+      else if (mod && e.key === 'w' && !e.shiftKey) { e.preventDefault(); closeActiveTab(); }
+      else if (e.ctrlKey && e.key === 'Tab') { e.preventDefault(); stepTab(e.shiftKey ? -1 : 1); }
     });
+
+    renderTabs();          // hidden until a file opens
+    handleTearoff();       // browser: adopt a tab handed over from another window
 
     // Remember the folder to start pickers in (set once you open a folder).
-    getStartDir().then(function (d) { if (d) state.startDir = d; });
-
-    // Offer reopen-last if available.
-    getLast().then(function (last) {
-      if (last) {
-        var btn = $('reopenLast');
-        btn.style.display = 'inline-block';
-        btn.textContent = 'Reopen ' + (last.name || 'last');
-        btn.addEventListener('click', reopenLast);
-      }
-    });
+    getStartDir().then(function (d) { if (d) app.startDir = d; });
 
     if (!window.showOpenFilePicker) {
       toast('This browser lacks the File System Access API. Use Chrome, Edge, or Brave.');
@@ -3446,7 +3702,7 @@ return He}()
     if (location.search.indexOf('selftest') !== -1 || location.search.indexOf('e2e') !== -1) {
       window.__mdv = {
         setSource: setSource, getSource: function () { return state.source; },
-        state: state, beginNewComment: beginNewComment, submitComposer: submitComposer,
+        beginNewComment: beginNewComment, submitComposer: submitComposer,
         composer: composer, enterEdit: enterEdit, commitEdit: commitEdit,
         deleteComment: deleteComment, writeFile: writeFile,
         reloadFromDisk: reloadFromDisk, scheduleSave: scheduleSave,
@@ -3460,7 +3716,13 @@ return He}()
         openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
         searchStep: searchStep, effectiveWrap: effectiveWrap,
         applyAppearance: applyAppearance, FONTS: FONTS,
+        app: app, openInTab: openInTab, closeTab: closeTab, activateTab: activateTab,
+        closeActiveTab: closeActiveTab, stepTab: stepTab, renderTabs: renderTabs,
+        moveTabToNewWindow: moveTabToNewWindow, newDoc: newDoc,
       };
+      // `state` is reassigned on every tab switch, so expose it as a live getter
+      // rather than a snapshot (the e2e driver reads __mdv.state.comments etc.).
+      Object.defineProperty(window.__mdv, 'state', { get: function () { return state; } });
     }
     if (location.search.indexOf('selftest') !== -1) setTimeout(runSelfTest, 50);
 
@@ -3473,6 +3735,8 @@ return He}()
           if (a === 'open-file') openFile();
           else if (a === 'open-folder') openFolder();
           else if (a === 'reload-file') reloadFromDisk();
+          else if (a === 'close-tab') closeActiveTab();
+          else if (a === 'move-tab-new-window') { if (app.active >= 0) moveTabToNewWindow(app.active); }
           else if (a === 'export-pdf') exportPDF();
           else if (a === 'toggle-sidebar') toggleSidebar();
         });
@@ -3487,6 +3751,7 @@ return He}()
   async function runSelfTest() {
     var results = [];
     function check(name, cond) { results.push((cond ? 'PASS' : 'FAIL') + ' ' + name); }
+    function skip(name) { results.push('SKIP ' + name); }
     try {
       var sample =
         '# Heading\n\n' +
@@ -3621,14 +3886,14 @@ return He}()
       check('save indicator returned to Saved', $('saveState').className === 'saved');
 
       // --- picker start-folder selection ---------------------------------
-      var savedStart = state.startDir;
-      state.startDir = null;
+      var savedStart = app.startDir;
+      app.startDir = null;
       check('picker defaults to Documents when no folder remembered', pickerStart() === 'documents');
       var fakeDir = { name: 'agents' };
       setStartDir(fakeDir);
       check('picker starts in the remembered folder', pickerStart() === fakeDir);
-      check('remembered folder kept in state', state.startDir === fakeDir);
-      state.startDir = savedStart;
+      check('remembered folder kept in state', app.startDir === fakeDir);
+      app.startDir = savedStart;
 
       // --- long-doc margin scrolling (the "can't see comments" bug) -------
       var longDoc = '# Long\n\n';
@@ -3686,7 +3951,7 @@ return He}()
         } };
       };
       var fakeRoot = mkDir('root', [mkDir('sub', [mkFile('inner.md')]), mkFile('top.md')]);
-      state.dirHandle = fakeRoot;
+      app.dirHandle = fakeRoot;
       await buildTree(fakeRoot);
       var dirRows = sidebar.querySelectorAll('.tree-item.dir');
       check('tree renders folder nodes', dirRows.length === 1);
@@ -3699,10 +3964,10 @@ return He}()
         childBox.style.display === 'block' && childBox.querySelectorAll('.tree-item').length >= 1);
       dirRows[0].click();
       check('folder collapses again', childBox.style.display === 'none');
-      state.dirHandle = null;
+      app.dirHandle = null;
 
       // --- customizable comment style + help ----------------------------
-      var savedSettings = { prefix: state.settings.prefix, responder: state.settings.responder, wrap: state.settings.wrap, font: state.settings.font, size: state.settings.size };
+      var savedSettings = { prefix: app.settings.prefix, responder: app.settings.responder, wrap: app.settings.wrap, font: app.settings.font, size: app.settings.size };
       populateVariants();
       var optVals = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants from prefix (GK default)',
@@ -3710,8 +3975,8 @@ return He}()
       // change the tag prefix + responder via the settings form
       $('setPrefix').value = 'ab!'; $('setResponder').value = 'me';
       saveSettings();
-      check('prefix cleaned + uppercased', state.settings.prefix === 'AB');
-      check('responder cleaned + uppercased', state.settings.responder === 'ME');
+      check('prefix cleaned + uppercased', app.settings.prefix === 'AB');
+      check('responder cleaned + uppercased', app.settings.responder === 'ME');
       var optVals2 = Array.prototype.map.call(composer.querySelectorAll('select option'), function (o) { return o.value; });
       check('composer variants update to new prefix', optVals2.join(',') === 'AB,AB-FIX,AB-Q,AB-NIT');
       check('settings persisted to localStorage',
@@ -3743,7 +4008,7 @@ return He}()
         check('empty composer body writes no comment', state.comments.length === 3);
       }
       // restore default settings
-      state.settings = savedSettings; persistSettings(); populateVariants();
+      app.settings = savedSettings; persistSettings(); populateVariants();
 
       // help overlay
       showModal('help');
@@ -3753,7 +4018,7 @@ return He}()
       check('help overlay closes', $('help').classList.contains('hidden'));
 
       // --- find in document (⌘F) -----------------------------------------
-      state.settings.wrap = '0'; // keep editing tests below from re-wrapping yet
+      app.settings.wrap = '0'; // keep editing tests below from re-wrapping yet
       setSource('# Doc\n\nThe word target appears here, and target again, plus TARGET upper.\n\nAnother para with no hits at all.\n');
       openSearch();
       $('searchInput').value = 'target';
@@ -3778,7 +4043,7 @@ return He}()
         for (var i = 0; i < state.blocks.length; i++) if (state.blocks[i].type === 'paragraph') return i;
         return -1;
       };
-      state.settings.wrap = '24';
+      app.settings.wrap = '24';
       setSource('Edit me please.\n');
       var wi = firstPara();
       enterEdit(wi);
@@ -3792,7 +4057,7 @@ return He}()
         state.source.replace(/\n/g, ' ').trim() === 'one two three four five six seven eight nine ten eleven twelve');
 
       // --- hard-wrap on save: auto-detected width ------------------------
-      state.settings.wrap = 'auto';
+      app.settings.wrap = 'auto';
       var sample40 = MDCore.wrapText(
         'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho', 40);
       setSource(sample40 + '\n');
@@ -3810,7 +4075,7 @@ return He}()
       // opening a block and leaving it untouched must be a pure no-op. The old
       // guard compared post-wrap bytes, which let a stray click silently reflow
       // a block the user only looked at.
-      state.settings.wrap = 'auto';
+      app.settings.wrap = 'auto';
       var outline = [
         '3.7 Persist check-failure detail in the run record (deferred from the work order;',
         '    today the detail survives only in the console output).',
@@ -3951,13 +4216,84 @@ return He}()
         JSON.parse(localStorage.getItem('mdviewer.settings')).font === 'serif');
       // out-of-range size is clamped
       openSettings(); $('setSize').value = '400'; saveSettings();
-      check('oversized font size clamped to 28', state.settings.size === 28);
+      check('oversized font size clamped to 28', app.settings.size === 28);
       // unknown font falls back to system
-      state.settings.font = 'bogus'; applyAppearance();
+      app.settings.font = 'bogus'; applyAppearance();
       check('unknown font falls back to system',
         getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
 
-      state.settings = savedSettings; persistSettings(); applyAppearance();
+      app.settings = savedSettings; persistSettings(); applyAppearance();
+
+      // --- tabs: multiple files, isolation, per-tab autosave, close ------
+      function fakeHandle(name, text) {
+        var store = { text: text };
+        return {
+          name: name, _electronPath: '/x/' + name, _store: store,
+          getFile: function () {
+            return Promise.resolve({ name: name, text: function () { return Promise.resolve(store.text); } });
+          },
+          createWritable: function () {
+            return Promise.resolve({ write: function (d) { store.text = d; return Promise.resolve(); },
+              close: function () { return Promise.resolve(); } });
+          },
+        };
+      }
+      while (app.tabs.length) app.tabs.pop();
+      app.active = -1;
+      var hA = fakeHandle('a.md', '# Alpha\n\naaa aaa aaa\n');
+      var hB = fakeHandle('b.md', '# Bravo\n\nbbb bbb bbb\n');
+      await openInTab(hA);
+      check('opening a file creates a tab', app.tabs.length === 1 && app.active === 0);
+      check('tab bar is shown with one tab',
+        $('tabbar').style.display === 'flex' && $('tabbar').querySelectorAll('.tab').length === 1);
+      check('the tab shows the opened content', state.source.indexOf('Alpha') !== -1);
+      await openInTab(hB);
+      check('a second file adds a tab and does not replace the first',
+        app.tabs.length === 2 && app.active === 1 && state.source.indexOf('Bravo') !== -1);
+      await openInTab(hA);
+      check('reopening an open file focuses it (no duplicate)', app.tabs.length === 2 && app.active === 0);
+
+      state = app.tabs[1]; app.active = 1; // (activateTab keeps state in sync; assert isolation)
+      activateTab(0);
+      state.source = '# Alpha\n\nedited in A\n';
+      activateTab(1);
+      check('tab B is unaffected by an edit made in tab A', state.source.indexOf('edited in A') === -1);
+      activateTab(0);
+      check('returning to tab A preserves its in-memory edit', state.source.indexOf('edited in A') !== -1);
+
+      // per-tab autosave binding: a save queued on B must write B even after we
+      // switch to A (the old global-timer design would have written the wrong file).
+      var bDoc = app.tabs[1];
+      bDoc.source = '# Bravo\n\nautosave me\n';
+      scheduleSaveDoc(bDoc, false); // 500 ms debounce
+      activateTab(0); // state now points at A
+      await new Promise(function (r) { setTimeout(r, 560); });
+      check('a queued autosave writes the tab it was scheduled for', hB._store.text.indexOf('autosave me') !== -1);
+      check('and does not write the other tab', hA._store.text.indexOf('autosave me') === -1);
+
+      await closeTab(app.active === 0 ? 1 : 0); // close B
+      check('closing a tab removes it', app.tabs.length === 1);
+      await closeTab(0);
+      check('closing the last tab shows the empty state',
+        app.tabs.length === 0 && $('empty').style.display === 'flex' && $('tabbar').style.display === 'none');
+
+      // move a tab to a new window. In the packaged app electronAPI is a
+      // read-only contextBridge object we cannot stub, and actually invoking
+      // tear-off would spawn a real window, so we only drive this in the
+      // headless browser run (where electronAPI is absent).
+      await openInTab(hA);
+      if (!window.electronAPI) {
+        var movedPath = null;
+        window.electronAPI = { openInNewWindow: function (p) { movedPath = p; } };
+        await moveTabToNewWindow(0);
+        delete window.electronAPI;
+        check('move-to-new-window asks Electron to open the file path', movedPath === '/x/a.md');
+        check('the moved tab is closed locally', app.tabs.length === 0);
+      } else {
+        skip('move-to-new-window (Electron tear-off, covered by the headless run)');
+        while (app.tabs.length) app.tabs.pop();
+        app.active = -1; state = newDoc();
+      }
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {
