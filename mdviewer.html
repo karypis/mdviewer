@@ -2922,13 +2922,30 @@ return He}()
       item.className = 'outline-item h' + level;
       item.textContent = text;
       (function (idx) {
-        item.addEventListener('click', function () {
-          var el = docEl.querySelector('.block[data-idx="' + idx + '"]');
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+        item.addEventListener('click', function () { scrollToBlock(idx); });
       })(i);
       sidebar.appendChild(item);
     }
+  }
+
+  // Scroll the document so block `idx` sits near the top of the viewport, and
+  // keep the comment margin (which scrolls in lockstep) aligned. scrollIntoView
+  // is avoided because it also nudges every scrollable ancestor; computing the
+  // target against #docwrap is exact. Returns the target scrollTop, or -1 if the
+  // block is not on screen. `smooth === false` jumps instantly (used by tests).
+  function scrollToBlock(idx, smooth) {
+    var el = docEl.querySelector('.block[data-idx="' + idx + '"]');
+    if (!el) return -1;
+    var top = el.getBoundingClientRect().top - docwrap.getBoundingClientRect().top
+      + docwrap.scrollTop - 8;
+    top = Math.max(0, top);
+    if (smooth === false || typeof docwrap.scrollTo !== 'function') {
+      docwrap.scrollTop = top;
+    } else {
+      docwrap.scrollTo({ top: top, behavior: 'smooth' });
+    }
+    marginEl.scrollTop = top;
+    return top;
   }
 
   // ---- core render ------------------------------------------------------
@@ -3719,6 +3736,7 @@ return He}()
         app: app, openInTab: openInTab, closeTab: closeTab, activateTab: activateTab,
         closeActiveTab: closeActiveTab, stepTab: stepTab, renderTabs: renderTabs,
         moveTabToNewWindow: moveTabToNewWindow, newDoc: newDoc,
+        scrollToBlock: scrollToBlock, docwrap: function () { return docwrap; },
       };
       // `state` is reassigned on every tab switch, so expose it as a live getter
       // rather than a snapshot (the e2e driver reads __mdv.state.comments etc.).
@@ -4223,6 +4241,33 @@ return He}()
         getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
 
       app.settings = savedSettings; persistSettings(); applyAppearance();
+
+      // --- outline click scrolls to the heading -------------------------
+      // A comment gives the margin real height so it scrolls in lockstep; a
+      // comment-less margin is short and stays at 0, which is fine in use.
+      app.dirHandle = null; // single-file mode so the outline (not a tree) renders
+      var longDoc = '# Top\n\n' + 'filler filler filler. '.repeat(15) + '\n\n' +
+        [0, 1, 2, 3, 4, 5].map(function (k) {
+          return '## Heading ' + k + '\n\n' + 'body body body body. '.repeat(40) +
+            (k === 2 ? ' <!-- GK: note -->' : '') + '\n';
+        }).join('\n');
+      setSource(longDoc);
+      var outlineItems = sidebar.querySelectorAll('.outline-item');
+      check('outline lists every heading', outlineItems.length === 7);
+      var headingBlocks = [];
+      for (var bi = 0; bi < state.blocks.length; bi++) {
+        if (state.blocks[bi].type === 'heading') headingBlocks.push(bi);
+      }
+      var midIdx = headingBlocks[4]; // a heading well down the document
+      docwrap.scrollTop = 0; marginEl.scrollTop = 0;
+      var tgt = scrollToBlock(midIdx, false); // instant for a synchronous assert
+      check('scrollToBlock computes a positive offset for a lower heading', tgt > 0);
+      check('the document scrolled to the heading', Math.abs(docwrap.scrollTop - tgt) < 2);
+      check('the comment margin stayed aligned with the document', Math.abs(marginEl.scrollTop - tgt) < 2);
+      // clicking the outline entry runs the same scroll (margin set synchronously)
+      docwrap.scrollTop = 0; marginEl.scrollTop = 0;
+      outlineItems[4].click(); // Top=0, Heading0=1, ... Heading3=4
+      check('clicking an outline entry jumps to its heading', marginEl.scrollTop > 0);
 
       // --- tabs: multiple files, isolation, per-tab autosave, close ------
       function fakeHandle(name, text) {
