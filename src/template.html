@@ -15,6 +15,7 @@
     <span class="spacer"></span>
     <button id="exportPdf" style="display:none">PDF</button>
     <button id="clearComments" style="display:none">Clear Comments</button>
+    <button id="themeToggle" title="Toggle light/dark reading panel">☾</button>
     <button id="settingsBtn" title="Comment-style settings">⚙</button>
     <button id="helpBtn" title="Help">?</button>
     <span id="saveState" class="saved"><span class="dot"></span><span class="label"></span></span>
@@ -74,8 +75,15 @@
     <label>Font size (px)
       <input id="setSize" type="number" min="11" max="28" step="1">
     </label>
-    <p class="hint">Sets the rendered document's font; headings, code, and tables
-      scale with it. The editor and comment cards are unaffected.</p>
+    <label>Reading panel
+      <select id="setTheme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </label>
+    <p class="hint">Sets the rendered document's font, size, and light/dark theme;
+      headings, code, and tables scale with the size. The toolbar <b>☾/☀</b> button
+      toggles the theme too. The editor and comment cards are unaffected.</p>
 
     <h3>Comments</h3>
     <label>Your initials (comment tag)
@@ -158,8 +166,9 @@
         <b>Clear Comments</b> removes them all at once.</p>
       <h3>Appearance</h3>
       <p>Open <b>⚙ Settings → Appearance</b> to change the document font (system,
-        serif, or monospace) and base font size. Headings, code, and tables scale
-        with it. The setting is remembered across sessions.</p>
+        serif, or monospace), base font size, and light/dark theme for the reading
+        panel. The toolbar <b>☾/☀</b> button toggles the theme directly. Headings,
+        code, and tables scale with the size, and the settings are remembered.</p>
       <h3>Customize the tag</h3>
       <p>Open <b>⚙ Settings</b> to set your own initials (e.g. <code>AB</code>) and the
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /

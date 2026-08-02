@@ -236,6 +236,31 @@ body {
 #doc hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
 #doc img { max-width: 100%; }
 
+/* ---- light reading panel (toggle) ----
+   Only the document panel flips; the toolbar, tabs, sidebar, and comment margin
+   stay dark. Fenced code blocks keep their dark syntax-highlight theme (readable
+   dark islands), so no second highlight theme is needed. */
+#docwrap.light { background: #fbfbf8; }
+#docwrap.light #doc { color: #1f2328; }
+#docwrap.light #empty { color: #57606a; }
+#docwrap.light #empty h1 { color: #1f2328; }
+#docwrap.light .block:hover,
+#docwrap.light .block.editing { background: #eeeeea; }
+#docwrap.light #doc h1,
+#docwrap.light #doc h2 { border-bottom-color: #d8d8d2; }
+#docwrap.light #doc blockquote { border-left-color: #d0d0c8; color: #57606a; }
+#docwrap.light #doc a { color: #0969da; }
+#docwrap.light #doc code { background: #ececE6; color: #1f2328; }
+/* Fenced blocks keep the dark highlight theme, so their plain text must stay
+   light. The inline-code rule above is more specific than the theme's `.hljs`
+   base color, so restore it here (this selector is more specific still). */
+#docwrap.light #doc pre code { background: none; color: #c9d1d9; }
+#docwrap.light #doc th { background: #efefe8; }
+#docwrap.light #doc th,
+#docwrap.light #doc td { border-color: #d8d8d2; }
+#docwrap.light #doc hr { border-top-color: #d8d8d2; }
+#docwrap.light .block-editor { background: #fff; color: #1f2328; }
+
 /* block editor */
 .block-editor {
   width: 100%;

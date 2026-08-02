@@ -255,12 +255,16 @@ Click **⚙** in the toolbar. Settings persist in `localStorage` under
 |---|---|---|---|
 | Document font | System, Helvetica/Arial, Georgia, Charter/New York, Monospace | System | Font of the rendered document |
 | Font size | 11 to 28 px | 15 | Base size. Headings, code, and tables scale with it |
+| Reading panel | Dark, Light | Dark | Light or dark theme for the document panel only |
 | Your initials | 1 to 6 letters or digits, uppercased | `GK` | The tag on comments you create. Replaces `GK` everywhere |
 | Audit-trail responder | 1 to 16 letters, digits, or hyphens, uppercased | `CLAUDE` | The name that splits a comment from its response |
 | Hard-wrap width | `auto`, a number, or `0` | `auto` | Column that edited paragraphs are wrapped to on save |
 
-The font and size affect the rendered document only. The block editor, the
-comment cards, and the toolbar keep their own type.
+The font, size, and theme affect the rendered document only. The block editor,
+the comment cards, and the app chrome (toolbar, tabs, sidebar) keep their own
+dark styling. The toolbar **☾/☀** button toggles the reading panel's theme
+without opening Settings; in light mode, fenced code blocks stay dark so they
+read as intentional code islands.
 
 The **?** toolbar button opens the same guidance as an in-app help page.
 
@@ -385,7 +389,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 118-check self-test inside the Electron bundle
+npm run selftest       # run the 132-check self-test inside the Electron bundle
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -431,7 +435,7 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
 node --test tests/*.test.js  # 59 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 118 in-browser checks (render, edit, comment, find, wrap, reload, tabs)
+bash tools/selftest.sh       # 132 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test

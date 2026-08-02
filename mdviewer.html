@@ -252,6 +252,31 @@ body {
 #doc hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
 #doc img { max-width: 100%; }
 
+/* ---- light reading panel (toggle) ----
+   Only the document panel flips; the toolbar, tabs, sidebar, and comment margin
+   stay dark. Fenced code blocks keep their dark syntax-highlight theme (readable
+   dark islands), so no second highlight theme is needed. */
+#docwrap.light { background: #fbfbf8; }
+#docwrap.light #doc { color: #1f2328; }
+#docwrap.light #empty { color: #57606a; }
+#docwrap.light #empty h1 { color: #1f2328; }
+#docwrap.light .block:hover,
+#docwrap.light .block.editing { background: #eeeeea; }
+#docwrap.light #doc h1,
+#docwrap.light #doc h2 { border-bottom-color: #d8d8d2; }
+#docwrap.light #doc blockquote { border-left-color: #d0d0c8; color: #57606a; }
+#docwrap.light #doc a { color: #0969da; }
+#docwrap.light #doc code { background: #ececE6; color: #1f2328; }
+/* Fenced blocks keep the dark highlight theme, so their plain text must stay
+   light. The inline-code rule above is more specific than the theme's `.hljs`
+   base color, so restore it here (this selector is more specific still). */
+#docwrap.light #doc pre code { background: none; color: #c9d1d9; }
+#docwrap.light #doc th { background: #efefe8; }
+#docwrap.light #doc th,
+#docwrap.light #doc td { border-color: #d8d8d2; }
+#docwrap.light #doc hr { border-top-color: #d8d8d2; }
+#docwrap.light .block-editor { background: #fff; color: #1f2328; }
+
 /* block editor */
 .block-editor {
   width: 100%;
@@ -500,6 +525,7 @@ body {
     <span class="spacer"></span>
     <button id="exportPdf" style="display:none">PDF</button>
     <button id="clearComments" style="display:none">Clear Comments</button>
+    <button id="themeToggle" title="Toggle light/dark reading panel">☾</button>
     <button id="settingsBtn" title="Comment-style settings">⚙</button>
     <button id="helpBtn" title="Help">?</button>
     <span id="saveState" class="saved"><span class="dot"></span><span class="label"></span></span>
@@ -559,8 +585,15 @@ body {
     <label>Font size (px)
       <input id="setSize" type="number" min="11" max="28" step="1">
     </label>
-    <p class="hint">Sets the rendered document's font; headings, code, and tables
-      scale with it. The editor and comment cards are unaffected.</p>
+    <label>Reading panel
+      <select id="setTheme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </label>
+    <p class="hint">Sets the rendered document's font, size, and light/dark theme;
+      headings, code, and tables scale with the size. The toolbar <b>☾/☀</b> button
+      toggles the theme too. The editor and comment cards are unaffected.</p>
 
     <h3>Comments</h3>
     <label>Your initials (comment tag)
@@ -643,8 +676,9 @@ body {
         <b>Clear Comments</b> removes them all at once.</p>
       <h3>Appearance</h3>
       <p>Open <b>⚙ Settings → Appearance</b> to change the document font (system,
-        serif, or monospace) and base font size. Headings, code, and tables scale
-        with it. The setting is remembered across sessions.</p>
+        serif, or monospace), base font size, and light/dark theme for the reading
+        panel. The toolbar <b>☾/☀</b> button toggles the theme directly. Headings,
+        code, and tables scale with the size, and the settings are remembered.</p>
       <h3>Customize the tag</h3>
       <p>Open <b>⚙ Settings</b> to set your own initials (e.g. <code>AB</code>) and the
         audit-trail responder. Kinds <code>-FIX</code> / <code>-Q</code> /
@@ -2358,13 +2392,13 @@ return He}()
     charter: "'Charter', 'New York', 'Iowan Old Style', Palatino, Georgia, serif",
     mono: "'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
   };
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' };
 
   // Window-level state: shared across every open tab in this window.
   var app = {
     dirHandle: null,      // the open folder (its tree fills the sidebar), or null
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' }, // comment style + wrap + appearance
     tabs: [],             // one document per open file
     active: -1,           // index into tabs of the visible document, or -1 (none)
   };
@@ -3252,6 +3286,7 @@ return He}()
         if (s.wrap != null) app.settings.wrap = s.wrap;
         if (s.font && FONTS[s.font]) app.settings.font = s.font;
         if (s.size != null) app.settings.size = cleanSize(s.size);
+        if (s.theme) app.settings.theme = cleanTheme(s.theme);
       }
     } catch (e) { /* defaults */ }
   }
@@ -3276,13 +3311,29 @@ return He}()
     if (!isFinite(n)) return DEFAULT_SETTINGS.size;
     return Math.max(11, Math.min(n, 28));
   }
+  // Reading-panel theme: only 'light' or 'dark' (dark is the default).
+  function cleanTheme(s) { return s === 'light' ? 'light' : 'dark'; }
   // Push the appearance settings into CSS custom properties on :root. The
   // document reads --doc-font / --doc-size; headings, code, and tables are em-
-  // scaled so they follow the base size.
+  // scaled so they follow the base size. The reading-panel theme is a `light`
+  // class on #docwrap; the app chrome (toolbar, tabs, sidebar) stays dark.
   function applyAppearance() {
     var root = document.documentElement;
     root.style.setProperty('--doc-font', FONTS[app.settings.font] || FONTS.system);
     root.style.setProperty('--doc-size', cleanSize(app.settings.size) + 'px');
+    var light = app.settings.theme === 'light';
+    if (docwrap) docwrap.classList.toggle('light', light);
+    var tb = $('themeToggle');
+    if (tb) {
+      tb.textContent = light ? '☀' : '☾';
+      tb.title = 'Reading panel: ' + (light ? 'light' : 'dark') + ' (click to toggle)';
+    }
+  }
+  // Flip the reading panel between light and dark, persisting the choice.
+  function toggleDocTheme() {
+    app.settings.theme = app.settings.theme === 'light' ? 'dark' : 'light';
+    persistSettings();
+    applyAppearance();
   }
 
   // Build the composer's variant dropdown from the configured prefix.
@@ -3300,6 +3351,7 @@ return He}()
   function openSettings() {
     $('setFont').value = FONTS[app.settings.font] ? app.settings.font : 'system';
     $('setSize').value = cleanSize(app.settings.size);
+    $('setTheme').value = cleanTheme(app.settings.theme);
     $('setPrefix').value = app.settings.prefix;
     $('setResponder').value = app.settings.responder;
     $('setWrap').value = app.settings.wrap === 'auto' ? '' : app.settings.wrap;
@@ -3316,6 +3368,7 @@ return He}()
     app.settings.wrap = cleanWrap($('setWrap').value);
     app.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
     app.settings.size = cleanSize($('setSize').value);
+    app.settings.theme = cleanTheme($('setTheme').value);
     persistSettings();
     applyAppearance();
     populateVariants();
@@ -3648,6 +3701,7 @@ return He}()
     $('clearComments').addEventListener('click', onClearComments);
     $('exportPdf').addEventListener('click', exportPDF);
     $('toggleSidebar').addEventListener('click', toggleSidebar);
+    $('themeToggle').addEventListener('click', toggleDocTheme);
     $('settingsBtn').addEventListener('click', openSettings);
     $('helpBtn').addEventListener('click', function () { showModal('help'); });
     $('helpClose').addEventListener('click', closeModal);
@@ -3732,7 +3786,7 @@ return He}()
         closeModal: closeModal, populateVariants: populateVariants,
         openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
         searchStep: searchStep, effectiveWrap: effectiveWrap,
-        applyAppearance: applyAppearance, FONTS: FONTS,
+        applyAppearance: applyAppearance, FONTS: FONTS, toggleDocTheme: toggleDocTheme,
         app: app, openInTab: openInTab, closeTab: closeTab, activateTab: activateTab,
         closeActiveTab: closeActiveTab, stepTab: stepTab, renderTabs: renderTabs,
         moveTabToNewWindow: moveTabToNewWindow, newDoc: newDoc,
@@ -4239,6 +4293,44 @@ return He}()
       app.settings.font = 'bogus'; applyAppearance();
       check('unknown font falls back to system',
         getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
+
+      // --- reading-panel light/dark toggle -------------------------------
+      app.settings.theme = 'dark'; applyAppearance();
+      check('dark is the default (no light class)', !docwrap.classList.contains('light'));
+      var darkBg = getComputedStyle(docwrap).backgroundColor;
+      toggleDocTheme();
+      check('toggle switches the reading panel to light',
+        app.settings.theme === 'light' && docwrap.classList.contains('light'));
+      check('light theme actually changes the panel background',
+        getComputedStyle(docwrap).backgroundColor !== darkBg);
+      check('theme persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.settings')).theme === 'light');
+      check('toolbar toggle glyph reflects light mode', $('themeToggle').textContent === '☀');
+      // the app chrome must stay dark: the toolbar background differs from the
+      // now-light reading panel.
+      check('toolbar stays dark in light reading mode',
+        getComputedStyle($('toolbar')).backgroundColor !== getComputedStyle(docwrap).backgroundColor);
+      toggleDocTheme();
+      check('toggle switches back to dark', app.settings.theme === 'dark' && !docwrap.classList.contains('light'));
+      // the Settings select drives the same setting
+      openSettings(); $('setTheme').value = 'light'; saveSettings();
+      check('settings select sets the light theme', app.settings.theme === 'light' && docwrap.classList.contains('light'));
+      // regression: fenced-code text must stay LIGHT in light mode (the code
+      // block keeps its dark background), not inherit the document's dark color.
+      setSource('para\n\n```js\nconst x = 1;\n```\n');
+      var preCode = docEl.querySelector('#doc pre code');
+      check('a code block rendered for the theme check', !!preCode);
+      if (preCode) {
+        var codeColor = getComputedStyle(preCode).color;
+        var docColor = getComputedStyle(docEl).color; // dark (#1f2328) in light mode
+        check('plain code text stays light on the dark code block', codeColor !== docColor);
+        check('the code block background stays dark in light mode',
+          getComputedStyle(preCode.closest('pre')).backgroundColor !== getComputedStyle(docwrap).backgroundColor);
+      }
+      var badTheme = JSON.parse(JSON.stringify(app.settings)); badTheme.theme = 'weird';
+      localStorage.setItem('mdviewer.settings', JSON.stringify(badTheme));
+      loadSettings();
+      check('an unknown theme value falls back to dark', app.settings.theme === 'dark');
 
       app.settings = savedSettings; persistSettings(); applyAppearance();
 

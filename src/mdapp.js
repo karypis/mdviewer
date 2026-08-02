@@ -15,13 +15,13 @@
     charter: "'Charter', 'New York', 'Iowan Old Style', Palatino, Georgia, serif",
     mono: "'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
   };
-  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 };
+  var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' };
 
   // Window-level state: shared across every open tab in this window.
   var app = {
     dirHandle: null,      // the open folder (its tree fills the sidebar), or null
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15 }, // comment style + wrap + appearance
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' }, // comment style + wrap + appearance
     tabs: [],             // one document per open file
     active: -1,           // index into tabs of the visible document, or -1 (none)
   };
@@ -909,6 +909,7 @@
         if (s.wrap != null) app.settings.wrap = s.wrap;
         if (s.font && FONTS[s.font]) app.settings.font = s.font;
         if (s.size != null) app.settings.size = cleanSize(s.size);
+        if (s.theme) app.settings.theme = cleanTheme(s.theme);
       }
     } catch (e) { /* defaults */ }
   }
@@ -933,13 +934,29 @@
     if (!isFinite(n)) return DEFAULT_SETTINGS.size;
     return Math.max(11, Math.min(n, 28));
   }
+  // Reading-panel theme: only 'light' or 'dark' (dark is the default).
+  function cleanTheme(s) { return s === 'light' ? 'light' : 'dark'; }
   // Push the appearance settings into CSS custom properties on :root. The
   // document reads --doc-font / --doc-size; headings, code, and tables are em-
-  // scaled so they follow the base size.
+  // scaled so they follow the base size. The reading-panel theme is a `light`
+  // class on #docwrap; the app chrome (toolbar, tabs, sidebar) stays dark.
   function applyAppearance() {
     var root = document.documentElement;
     root.style.setProperty('--doc-font', FONTS[app.settings.font] || FONTS.system);
     root.style.setProperty('--doc-size', cleanSize(app.settings.size) + 'px');
+    var light = app.settings.theme === 'light';
+    if (docwrap) docwrap.classList.toggle('light', light);
+    var tb = $('themeToggle');
+    if (tb) {
+      tb.textContent = light ? '☀' : '☾';
+      tb.title = 'Reading panel: ' + (light ? 'light' : 'dark') + ' (click to toggle)';
+    }
+  }
+  // Flip the reading panel between light and dark, persisting the choice.
+  function toggleDocTheme() {
+    app.settings.theme = app.settings.theme === 'light' ? 'dark' : 'light';
+    persistSettings();
+    applyAppearance();
   }
 
   // Build the composer's variant dropdown from the configured prefix.
@@ -957,6 +974,7 @@
   function openSettings() {
     $('setFont').value = FONTS[app.settings.font] ? app.settings.font : 'system';
     $('setSize').value = cleanSize(app.settings.size);
+    $('setTheme').value = cleanTheme(app.settings.theme);
     $('setPrefix').value = app.settings.prefix;
     $('setResponder').value = app.settings.responder;
     $('setWrap').value = app.settings.wrap === 'auto' ? '' : app.settings.wrap;
@@ -973,6 +991,7 @@
     app.settings.wrap = cleanWrap($('setWrap').value);
     app.settings.font = FONTS[$('setFont').value] ? $('setFont').value : 'system';
     app.settings.size = cleanSize($('setSize').value);
+    app.settings.theme = cleanTheme($('setTheme').value);
     persistSettings();
     applyAppearance();
     populateVariants();
@@ -1305,6 +1324,7 @@
     $('clearComments').addEventListener('click', onClearComments);
     $('exportPdf').addEventListener('click', exportPDF);
     $('toggleSidebar').addEventListener('click', toggleSidebar);
+    $('themeToggle').addEventListener('click', toggleDocTheme);
     $('settingsBtn').addEventListener('click', openSettings);
     $('helpBtn').addEventListener('click', function () { showModal('help'); });
     $('helpClose').addEventListener('click', closeModal);
@@ -1389,7 +1409,7 @@
         closeModal: closeModal, populateVariants: populateVariants,
         openSearch: openSearch, closeSearch: closeSearch, runSearch: runSearch,
         searchStep: searchStep, effectiveWrap: effectiveWrap,
-        applyAppearance: applyAppearance, FONTS: FONTS,
+        applyAppearance: applyAppearance, FONTS: FONTS, toggleDocTheme: toggleDocTheme,
         app: app, openInTab: openInTab, closeTab: closeTab, activateTab: activateTab,
         closeActiveTab: closeActiveTab, stepTab: stepTab, renderTabs: renderTabs,
         moveTabToNewWindow: moveTabToNewWindow, newDoc: newDoc,
@@ -1896,6 +1916,44 @@
       app.settings.font = 'bogus'; applyAppearance();
       check('unknown font falls back to system',
         getComputedStyle(document.documentElement).getPropertyValue('--doc-font').indexOf('-apple-system') !== -1);
+
+      // --- reading-panel light/dark toggle -------------------------------
+      app.settings.theme = 'dark'; applyAppearance();
+      check('dark is the default (no light class)', !docwrap.classList.contains('light'));
+      var darkBg = getComputedStyle(docwrap).backgroundColor;
+      toggleDocTheme();
+      check('toggle switches the reading panel to light',
+        app.settings.theme === 'light' && docwrap.classList.contains('light'));
+      check('light theme actually changes the panel background',
+        getComputedStyle(docwrap).backgroundColor !== darkBg);
+      check('theme persisted to localStorage',
+        JSON.parse(localStorage.getItem('mdviewer.settings')).theme === 'light');
+      check('toolbar toggle glyph reflects light mode', $('themeToggle').textContent === '☀');
+      // the app chrome must stay dark: the toolbar background differs from the
+      // now-light reading panel.
+      check('toolbar stays dark in light reading mode',
+        getComputedStyle($('toolbar')).backgroundColor !== getComputedStyle(docwrap).backgroundColor);
+      toggleDocTheme();
+      check('toggle switches back to dark', app.settings.theme === 'dark' && !docwrap.classList.contains('light'));
+      // the Settings select drives the same setting
+      openSettings(); $('setTheme').value = 'light'; saveSettings();
+      check('settings select sets the light theme', app.settings.theme === 'light' && docwrap.classList.contains('light'));
+      // regression: fenced-code text must stay LIGHT in light mode (the code
+      // block keeps its dark background), not inherit the document's dark color.
+      setSource('para\n\n```js\nconst x = 1;\n```\n');
+      var preCode = docEl.querySelector('#doc pre code');
+      check('a code block rendered for the theme check', !!preCode);
+      if (preCode) {
+        var codeColor = getComputedStyle(preCode).color;
+        var docColor = getComputedStyle(docEl).color; // dark (#1f2328) in light mode
+        check('plain code text stays light on the dark code block', codeColor !== docColor);
+        check('the code block background stays dark in light mode',
+          getComputedStyle(preCode.closest('pre')).backgroundColor !== getComputedStyle(docwrap).backgroundColor);
+      }
+      var badTheme = JSON.parse(JSON.stringify(app.settings)); badTheme.theme = 'weird';
+      localStorage.setItem('mdviewer.settings', JSON.stringify(badTheme));
+      loadSettings();
+      check('an unknown theme value falls back to dark', app.settings.theme === 'dark');
 
       app.settings = savedSettings; persistSettings(); applyAppearance();
 
