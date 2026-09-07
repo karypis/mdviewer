@@ -652,10 +652,14 @@
     for (var c = 0; c < codes.length; c++) {
       try { window.hljs.highlightElement(codes[c]); } catch (e) {}
     }
+    materializeMarkers(docEl);
   }
 
   // Render one block to sanitized HTML, replacing each GK comment with an
-  // empty marker span so we can anchor highlights/cards to its position.
+  // invisible text token (MDCore.markerToken). materializeMarkers later turns
+  // each token into the empty marker span that highlights and cards anchor
+  // to. A text token, unlike an injected <span>, also survives inside fenced
+  // code blocks, inline code spans, and HTML blocks.
   function renderBlockInner(block, comments) {
     var raw = block.raw;
     var sorted = comments.slice().sort(function (a, b) { return b.start - a.start; });
@@ -663,9 +667,33 @@
       var c = sorted[i];
       var ls = c.start - block.start;
       var le = c.end - block.start;
-      raw = raw.slice(0, ls) + '<span class="gkmark" data-gk="' + c.id + '"></span>' + raw.slice(le);
+      raw = raw.slice(0, ls) + MDCore.markerToken(c.id) + raw.slice(le);
     }
     return sanitize(MDCore.mdToHtml(raw));
+  }
+
+  // Replace every marker token in the rendered text under `root` with
+  // <span class="gkmark" data-gk="id"></span>, splitting the text node around
+  // it. Runs after highlight.js, which rewrites code blocks from their text.
+  function materializeMarkers(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var hits = [], n;
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue.indexOf('\uE000') !== -1) hits.push(n);
+    }
+    for (var i = 0; i < hits.length; i++) {
+      var node = hits[i];
+      var m;
+      while ((m = MDCore.markerTokenRe().exec(node.nodeValue)) !== null) {
+        var rest = node.splitText(m.index); // node: text before; rest: token + after
+        rest.nodeValue = rest.nodeValue.slice(m[0].length);
+        var span = document.createElement('span');
+        span.className = 'gkmark';
+        span.dataset.gk = MDCore.markerTokenId(m[1]);
+        rest.parentNode.insertBefore(span, rest);
+        node = rest;
+      }
+    }
   }
 
   // ---- comments: margin cards + anchored highlights --------------------
@@ -689,7 +717,7 @@
       var c = state.comments[i];
       var marker = docEl.querySelector('.gkmark[data-gk="' + c.id + '"]');
       if (marker) {
-        var range = anchorWordRange(marker.closest('.block'), marker);
+        var range = anchorSpanRange(marker.closest('.block'), marker, c.span);
         if (range && spanHL && !range.collapsed) spanHL.add(range);
         state._ranges[c.id] = range;
       }
@@ -713,24 +741,30 @@
     return { node: last.node, offset: last.len };
   }
 
-  // A Range covering only the single word immediately preceding `marker` (the
-  // word the comment attaches to). Returns null if there is no preceding word
-  // (e.g. a standalone comment), in which case nothing is highlighted.
-  function anchorWordRange(blockEl, marker) {
+  // A Range covering the `span` words a comment highlights: the word
+  // immediately preceding `marker` (the word the comment attaches to) plus the
+  // next span-1 words after it, within the block. Returns null if there is no
+  // preceding word (e.g. a standalone comment), in which case nothing is
+  // highlighted.
+  function anchorSpanRange(blockEl, marker, span) {
     if (!blockEl) return null;
     var walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT, null);
     var nodes = [];
     var total = 0;
+    var markerPos = -1;
     var n;
     while ((n = walker.nextNode())) {
-      // only text that comes BEFORE the marker in document order
-      if (marker.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) break;
+      // note where the marker sits in the block's concatenated text
+      if (markerPos < 0 && (marker.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+        markerPos = total;
+      }
       nodes.push({ node: n, start: total, len: n.nodeValue.length });
       total += n.nodeValue.length;
     }
-    if (!total) return null;
+    if (markerPos < 0) markerPos = total;
+    if (!markerPos) return null;
     var text = nodes.map(function (x) { return x.node.nodeValue; }).join('');
-    var wb = MDCore.lastWordRange(text); // single word before the marker (tested rule)
+    var wb = MDCore.spanRange(text, markerPos, span); // tested rule in mdcore
     if (!wb) return null;
     var s = charToNodeOffset(nodes, wb.start);
     var e = charToNodeOffset(nodes, wb.end);
@@ -854,7 +888,8 @@
     var pos = MDCore.locateInsertOffset(block.raw, block.start, ps.prefix, ps.text);
     if (pos == null) pos = block.end - (block.raw.match(/\n*$/)[0].length); // fallback: end of content
     commentBtn.classList.remove('open');
-    openComposer({ type: 'new', pos: pos }, '', app.settings.prefix, ps.rect);
+    var span = MDCore.countWords(ps.text);
+    openComposer({ type: 'new', pos: pos, span: span }, '', app.settings.prefix, ps.rect);
   }
 
   function editComment(c) {
@@ -1047,7 +1082,8 @@
     var tag = composer.querySelector('select').value;
     var body = composer.querySelector('textarea').value.trim();
     if (!body) { closeComposer(); return; }
-    var text = MDCore.serializeComment(tag, body);
+    var span = mode.type === 'new' ? mode.span : mode.comment.span;
+    var text = MDCore.serializeComment(tag, body, span);
     var at;
     if (mode.type === 'new') {
       at = mode.pos;
@@ -1455,9 +1491,10 @@
         'Second para with an existing <!-- GK: inline note --> comment.\n\n' +
         '<!-- GK-FIX: a standalone fix -->\n\n' +
         'Audit line <!-- GK: do X / CLAUDE: did X --> end.\n\n' +
+        'Span para: the quick<!-- GK: three words SPAN:3 --> brown fox jumps over.\n\n' +
         '- list item one\n- list item two\n\n' +
         '| a | b |\n| - | - |\n| 1 | 2 |\n\n' +
-        '```js\nconst x = 1;\n```\n';
+        '```js\nconst<!-- GK: in code SPAN:3 --> x = 1;\n```\n';
       setSource(sample);
 
       check('blocks rendered', docEl.querySelectorAll('.block').length >= 7);
@@ -1466,8 +1503,8 @@
       check('list rendered', !!docEl.querySelector('ul li'));
       check('bold rendered', !!docEl.querySelector('strong'));
       check('code highlighted (hljs)', !!docEl.querySelector('pre code.hljs'));
-      check('comment markers present', docEl.querySelectorAll('.gkmark').length === 3);
-      check('margin cards present', marginEl.querySelectorAll('.comment-card').length === 3);
+      check('comment markers present', docEl.querySelectorAll('.gkmark').length === 5);
+      check('margin cards present', marginEl.querySelectorAll('.comment-card').length === 5);
       check('audit-trail CLAUDE shown', !!marginEl.querySelector('.comment-card .claude'));
       check('variant class applied', !!marginEl.querySelector('.comment-card.gk-fix'));
       check('CSS custom highlight registered',
@@ -1476,17 +1513,31 @@
       check('card positioned absolutely', firstCard && firstCard.style.top !== '');
 
       // Strong content assertions on WHAT is highlighted (the bug the weak
-      // ".has('gk-span')" check missed): each comment highlights exactly its
-      // one anchor word, a standalone comment highlights nothing.
+      // ".has('gk-span')" check missed): a comment without SPAN highlights
+      // exactly its one anchor word, a SPAN:N comment highlights N words, a
+      // standalone comment highlights nothing.
       var cBody = function (b) { return state.comments.filter(function (c) { return c.body === b; })[0]; };
       var rtext = function (id) { var r = state._ranges[id]; return r ? r.toString() : null; };
       var ic = cBody('inline note'), sc = cBody('a standalone fix'), ac = cBody('do X');
+      var spc = cBody('three words');
       check('inline comment highlights exactly "existing"', ic && rtext(ic.id) === 'existing');
       check('audit comment highlights exactly "line"', ac && rtext(ac.id) === 'line');
       check('standalone comment highlights nothing',
         sc && (state._ranges[sc.id] == null || state._ranges[sc.id].collapsed));
+      check('SPAN:3 comment parses body without the field and span=3', spc && spc.span === 3);
+      check('SPAN:3 comment highlights "quick brown fox"', spc && rtext(spc.id) === 'quick brown fox');
+      // a comment inside a fenced code block must become a marker element,
+      // not literal "<span ...>" text in the code (nor a stray token char)
+      var codeEl = docEl.querySelector('pre code');
+      var cc = cBody('in code');
+      check('code-block comment renders as a marker element inside <code>',
+        !!codeEl.querySelector('.gkmark[data-gk="' + (cc && cc.id) + '"]'));
+      check('code-block text carries no literal marker or token',
+        codeEl.textContent.indexOf('gkmark') === -1 && codeEl.textContent.indexOf('\uE000') === -1);
+      check('code-block comment highlights "const x ="', cc && rtext(cc.id) === 'const x =');
+      check('no marker token survives anywhere in the document', docEl.textContent.indexOf('\uE000') === -1);
       var hlset = CSS.highlights.get('gk-span');
-      check('one highlight range per anchored word (not the whole run)', hlset && hlset.size === 2);
+      check('one highlight range per anchored comment', hlset && hlset.size === 4);
 
       // --- write path: select a phrase and insert a comment via real DOM ---
       var para = docEl.querySelectorAll('.block')[1];
@@ -1518,9 +1569,9 @@
         composer.querySelector('select').value = 'GK-Q';
         submitComposer();
         var src = state.source;
-        check('comment attached to first word of selection',
-          src.indexOf('computes<!-- GK-Q: which algorithm? --> an initial partition') !== -1);
-        check('comment count grew to 4', state.comments.length === 4);
+        check('comment attached to first word of selection, with SPAN word count',
+          src.indexOf('computes<!-- GK-Q: which algorithm? SPAN:4 --> an initial partition') !== -1);
+        check('comment count grew to 6', state.comments.length === 6);
         // card vertical alignment: card top tracks its marker's line
         var nc = state.comments.filter(function (c) { return c.body === 'which algorithm?'; })[0];
         var ncCard = marginEl.querySelector('.comment-card[data-id="' + nc.id + '"]');
@@ -1528,9 +1579,15 @@
         var cardTop = parseFloat(ncCard.style.top);
         var markTop = ncMark.getBoundingClientRect().top - docEl.getBoundingClientRect().top;
         check('card aligned to its anchor line', Math.abs(cardTop - markTop) < 24);
-        // highlight covers only the single anchored word, not the whole run
+        // highlight covers the whole selected span (SPAN:4), not just the anchor word
         var rng = state._ranges[nc.id];
-        check('highlight is the single anchored word', rng && rng.toString() === 'computes');
+        check('highlight is the full selected span', rng && rng.toString() === 'computes an initial partition');
+        // editing the comment body preserves its span field
+        editComment(nc);
+        composer.querySelector('textarea').value = 'which algorithm, exactly?';
+        submitComposer();
+        check('edit preserves SPAN field',
+          state.source.indexOf('computes<!-- GK-Q: which algorithm, exactly? SPAN:4 --> an initial partition') !== -1);
       }
 
       // --- block editing: edit the heading block, only it should change ---

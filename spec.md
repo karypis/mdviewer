@@ -139,7 +139,12 @@ with your existing grep-and-process workflow and render invisibly in GitHub/Noti
 
 ```
 <!-- GK: free-form comment text -->
+<!-- GK: free-form comment text SPAN:4 -->
 ```
+
+The optional trailing `SPAN:N` field records the number of words the user selected
+when leaving the comment. It is written only when N is greater than 1, so one-word
+comments keep the bare form. The field is stripped from the displayed body.
 
 The viewer also recognizes and renders your documented variants — `GK-FIX:`, `GK-Q:`,
 `GK-NIT:` — and the audit-trail form `<!-- GK: original / CLAUDE: response -->`. New
@@ -163,12 +168,19 @@ byte-identical to your existing convention, with no extra markers ever written.
 
 - **Render.** Every `<!-- GK: ... -->` in the source is parsed out of the rendered flow
   and shown as a margin card aligned to its anchored span. The raw comment text is
-  never shown inline in the document body.
+  never shown inline in the document body. Each comment is replaced in the block's
+  markdown by an invisible Private Use Area text token (U+E000 ... U+E001), which
+  survives marked, DOMPurify, and highlight.js, and is swapped for an empty marker
+  element after rendering. This is what lets a comment inside a fenced code block,
+  an inline code span, or an HTML block render as a marker rather than as literal
+  text.
 
 - **Anchoring rule.** A new comment is placed right after the first word of the
-  selection. When rendered, a comment highlights the inline run of text immediately
-  preceding it within the same block, bounded by the start of the block or the end of
-  a previous GK comment in that block. The margin card aligns to that anchor's line.
+  selection, and its `SPAN:N` field records the selection's word count. When
+  rendered, a comment highlights the word immediately preceding it plus the next N-1
+  words after it within the same block (fewer if the block ends first). A comment
+  without a `SPAN` field highlights the single preceding word. The margin card aligns
+  to that anchor's line.
 
   - Anchoring to the first word keeps the card aligned with the top of what you selected
     (rather than trailing to the end of a multi-line selection).

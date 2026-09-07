@@ -148,13 +148,16 @@ that appears next to the selection, pick a tag from the dropdown, type your note
 and press **⌘↵** or click **Save**. Submitting an empty note cancels instead.
 
 The comment is written into the source immediately after the **first word** of
-your selection:
+your selection. A trailing `SPAN:N` field records how many words you selected:
 
 ```
-The algorithm computes<!-- GK-Q: which one? --> an initial partition.
+The algorithm computes<!-- GK-Q: which one? SPAN:4 --> an initial partition.
 ```
 
-That first word is what the margin card anchors to and what the app highlights.
+The margin card anchors to that first word. The app highlights the first word
+plus the next N-1 words after the comment, so the whole selection is marked.
+A one-word selection writes no `SPAN` field, so those comments keep the bare
+`<!-- GK: ... -->` form. A comment without a `SPAN` field highlights one word.
 A selection that spans two blocks is ignored, and so is a selection that starts
 in a block and ends outside it.
 
@@ -326,9 +329,9 @@ The app renders *every* tag matching that grammar, not just yours. It writes new
 comments with the initials you configured. That is what lets two people comment
 in the same file and each see both sets of notes.
 
-New comments anchor after the first word of your selection. The app highlights
-exactly the single word immediately preceding the comment, never the whole run of
-text before it.
+New comments anchor after the first word of your selection and record the
+selection's word count in a trailing `SPAN:N` field. The app highlights that
+first word plus the next N-1 words. Without the field it highlights one word.
 
 ## Install the macOS app
 
@@ -389,7 +392,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 132-check self-test inside the Electron bundle
+npm run selftest       # run the 142-check self-test inside the Electron bundle
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -434,8 +437,8 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
-node --test tests/*.test.js  # 59 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 132 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
+node --test tests/*.test.js  # 74 unit + integration tests (pure logic + shipped file)
+bash tools/selftest.sh       # 142 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test

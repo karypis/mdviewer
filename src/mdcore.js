@@ -95,8 +95,11 @@
 
   // Parse every review comment in `source`. Each result has the tag, the human
   // body, an optional audit-trail response (split on `/ <responder>:`, default
-  // responder "CLAUDE"), the variant css class, and the exact [start,end) byte
-  // range of the whole `<!-- ... -->` token.
+  // responder "CLAUDE"), the span (number of words the comment highlights, from
+  // a trailing `SPAN:N` field; 1 when absent), the variant css class, and the
+  // exact [start,end) byte range of the whole `<!-- ... -->` token.
+  var SPAN_RE = /\s*\bSPAN:(\d+)\s*$/;
+
   function parseComments(source, responder) {
     var respRe = new RegExp('\\s*/\\s*' + escapeRegExp(responder || 'CLAUDE') + '\\s*:\\s*');
     var out = [];
@@ -112,11 +115,18 @@
         body = parts[0].trim();
         claude = parts[1].trim();
       }
+      var span = 1;
+      var sm = body.match(SPAN_RE);
+      if (sm) {
+        span = Math.max(1, parseInt(sm[1], 10) || 1);
+        body = body.slice(0, sm.index).trim();
+      }
       out.push({
         tag: tag,
         variant: variantClass(tag),
         body: body,
         claude: claude,
+        span: span,
         start: m.index,
         end: m.index + m[0].length,
         raw: m[0],
@@ -151,11 +161,47 @@
     return s;
   }
 
-  // Build the exact bytes of a GK comment from a tag and body.
-  function serializeComment(tag, body) {
+  // Build the exact bytes of a GK comment from a tag, body, and span (word
+  // count of the highlighted selection). A span of 1 (or none) writes the bare
+  // form, so single-word comments stay byte-identical to the old convention.
+  function serializeComment(tag, body, span) {
     var t = (tag || 'GK').trim();
     var b = String(body == null ? '' : body).trim();
-    return '<!-- ' + t + ': ' + b + ' -->';
+    var n = parseInt(span, 10);
+    var field = (n > 1) ? ' SPAN:' + n : '';
+    return '<!-- ' + t + ': ' + b + field + ' -->';
+  }
+
+  // Comment markers are injected into a block's markdown as an invisible TEXT
+  // token rather than as an HTML <span>. HTML injected into a fenced code
+  // block, an inline code span, or an HTML block renders literally, while a
+  // text token passes through marked, DOMPurify, and highlight.js untouched.
+  // The token uses Private Use Area code points only (no ASCII, so no
+  // tokenizer splits it): U+E000, one of U+E010..U+E019 per decimal digit of
+  // the comment id, then U+E001. The app swaps each token for the real marker
+  // element after rendering (see materializeMarkers in mdapp.js).
+  var MARK_OPEN = '\uE000', MARK_CLOSE = '\uE001';
+
+  function markerToken(id) {
+    var s = String(id), out = MARK_OPEN;
+    for (var i = 0; i < s.length; i++) out += String.fromCharCode(0xE010 + (s.charCodeAt(i) - 48));
+    return out + MARK_CLOSE;
+  }
+
+  // A fresh global regex matching one token; group 1 holds the encoded digits.
+  function markerTokenRe() { return /\uE000([\uE010-\uE019]*)\uE001/g; }
+
+  // Decode group 1 of markerTokenRe back to the numeric comment id.
+  function markerTokenId(digits) {
+    var id = '';
+    for (var i = 0; i < digits.length; i++) id += String.fromCharCode(digits.charCodeAt(i) - 0xE010 + 48);
+    return parseInt(id, 10);
+  }
+
+  // Number of whitespace-delimited words in `text` (0 for empty).
+  function countWords(text) {
+    var m = String(text || '').match(/\S+/g);
+    return m ? m.length : 0;
   }
 
   // Group parsed comments by the block (from lexBlocks) that contains them,
@@ -192,6 +238,29 @@
     var m = trimmed.match(/\S+$/);
     if (!m) return null;
     return { start: trimmed.length - m[0].length, end: trimmed.length };
+  }
+
+  // [start, end) of the `n`-word span a comment highlights, within the rendered
+  // text of its block. `markerPos` is the character offset where the comment
+  // sits. The span starts at the word immediately before the marker (the
+  // comment is inserted after the first word of the selection) and extends
+  // over the next n-1 words after the marker, or fewer if the block ends first.
+  // Returns null when no word precedes the marker (a standalone comment).
+  function spanRange(text, markerPos, n) {
+    var t = text || '';
+    var wb = lastWordRange(t.slice(0, markerPos));
+    if (!wb) return null;
+    var end = wb.end;
+    var want = (parseInt(n, 10) || 1) - 1;
+    if (want > 0) {
+      var re = /\S+/g, m, seen = 0;
+      var after = t.slice(markerPos);
+      while (seen < want && (m = re.exec(after)) !== null) {
+        seen++;
+        end = markerPos + m.index + m[0].length;
+      }
+    }
+    return { start: wb.start, end: end };
   }
 
   // ---- line-length re-wrapping (hard-wrap on save) ---------------------
@@ -444,6 +513,11 @@
     locateInsertOffset: locateInsertOffset,
     projectPlain: projectPlain,
     lastWordRange: lastWordRange,
+    spanRange: spanRange,
+    countWords: countWords,
+    markerToken: markerToken,
+    markerTokenRe: markerTokenRe,
+    markerTokenId: markerTokenId,
     hasAuthoredLayout: hasAuthoredLayout,
     wrapText: wrapText,
     wrapBlockRaw: wrapBlockRaw,

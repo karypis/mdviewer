@@ -179,3 +179,108 @@ test('commentsByBlock: assigns comments to their containing block', () => {
   for (const k of owners) total += map[k].length;
   assert.strictEqual(total, 2);
 });
+
+test('parseComments: trailing SPAN:N field sets span and is stripped from the body', () => {
+  const src = 'the quick <!-- GK: three words SPAN:3 --> brown fox\n';
+  const cs = MDCore.parseComments(src);
+  assert.strictEqual(cs.length, 1);
+  assert.strictEqual(cs[0].body, 'three words');
+  assert.strictEqual(cs[0].span, 3);
+});
+
+test('parseComments: span defaults to 1 without the field', () => {
+  const cs = MDCore.parseComments('a <!-- GK: note --> b\n');
+  assert.strictEqual(cs[0].span, 1);
+  assert.strictEqual(cs[0].body, 'note');
+});
+
+test('parseComments: SPAN sits before the audit-trail response', () => {
+  const cs = MDCore.parseComments('a <!-- GK: original SPAN:2 / CLAUDE: addressed --> b\n');
+  assert.strictEqual(cs[0].body, 'original');
+  assert.strictEqual(cs[0].span, 2);
+  assert.strictEqual(cs[0].claude, 'addressed');
+});
+
+test('parseComments: SPAN mentioned mid-body is left alone', () => {
+  const cs = MDCore.parseComments('a <!-- GK: the SPAN:2 idea is wrong --> b\n');
+  assert.strictEqual(cs[0].body, 'the SPAN:2 idea is wrong');
+  assert.strictEqual(cs[0].span, 1);
+});
+
+test('serializeComment: writes SPAN:N only when N > 1', () => {
+  assert.strictEqual(MDCore.serializeComment('GK', 'note'), '<!-- GK: note -->');
+  assert.strictEqual(MDCore.serializeComment('GK', 'note', 1), '<!-- GK: note -->');
+  assert.strictEqual(MDCore.serializeComment('GK', 'note', 0), '<!-- GK: note -->');
+  assert.strictEqual(MDCore.serializeComment('GK-Q', 'note', 4), '<!-- GK-Q: note SPAN:4 -->');
+});
+
+test('serializeComment/parseComments: SPAN round-trips', () => {
+  const bytes = MDCore.serializeComment('GK', 'why?', 5);
+  const cs = MDCore.parseComments('x ' + bytes + ' y');
+  assert.strictEqual(cs[0].body, 'why?');
+  assert.strictEqual(cs[0].span, 5);
+  assert.strictEqual(MDCore.serializeComment(cs[0].tag, cs[0].body, cs[0].span), bytes);
+});
+
+test('countWords: whitespace-delimited, newline-tolerant', () => {
+  assert.strictEqual(MDCore.countWords(''), 0);
+  assert.strictEqual(MDCore.countWords('  computes  '), 1);
+  assert.strictEqual(MDCore.countWords('computes an\ninitial partition'), 4);
+});
+
+test('spanRange: n=1 is the single word before the marker', () => {
+  const text = 'The algorithm computes an initial partition.';
+  const pos = text.indexOf('computes') + 'computes'.length;
+  const r = MDCore.spanRange(text, pos, 1);
+  assert.strictEqual(text.slice(r.start, r.end), 'computes');
+});
+
+test('spanRange: n words = anchor word plus the next n-1 after the marker', () => {
+  const text = 'The algorithm computes an initial partition here.';
+  const pos = text.indexOf('computes') + 'computes'.length;
+  const r = MDCore.spanRange(text, pos, 4);
+  assert.strictEqual(text.slice(r.start, r.end), 'computes an initial partition');
+});
+
+test('spanRange: clamps to the end of the block text', () => {
+  const text = 'ends with computes an';
+  const pos = text.indexOf('computes') + 'computes'.length;
+  const r = MDCore.spanRange(text, pos, 9);
+  assert.strictEqual(text.slice(r.start, r.end), 'computes an');
+});
+
+test('spanRange: spans a line break in the rendered text', () => {
+  const text = 'a computes\nan initial';
+  const pos = text.indexOf('computes') + 'computes'.length;
+  const r = MDCore.spanRange(text, pos, 3);
+  assert.strictEqual(text.slice(r.start, r.end), 'computes\nan initial');
+});
+
+test('spanRange: no word before the marker returns null', () => {
+  assert.strictEqual(MDCore.spanRange('  \nafter words', 3, 2), null);
+  assert.strictEqual(MDCore.spanRange('after words', 0, 2), null);
+});
+
+test('markerToken: private-use characters only, decodes back to the id', () => {
+  for (const id of [0, 1, 7, 12, 305]) {
+    const tok = MDCore.markerToken(id);
+    assert.ok(/^[\uE000-\uE0FF]+$/.test(tok), 'no ASCII in token: ' + JSON.stringify(tok));
+    const m = MDCore.markerTokenRe().exec(tok);
+    assert.ok(m && m[0] === tok);
+    assert.strictEqual(MDCore.markerTokenId(m[1]), id);
+  }
+});
+
+test('markerToken survives rendering inside a fenced code block', () => {
+  const tok = MDCore.markerToken(1);
+  const html = MDCore.mdToHtml('```sh\nnpx' + tok + ' tsx src/cli.ts\n```\n');
+  assert.ok(html.indexOf('npx' + tok + ' tsx') !== -1, html);
+  assert.ok(html.indexOf('gkmark') === -1, 'no literal span text in code');
+});
+
+test('markerToken survives rendering inside an inline code span and bold', () => {
+  const tok = MDCore.markerToken(2);
+  const html = MDCore.mdToHtml('use `.nsr' + tok + '.knowledge` and **three' + tok + ' pieces**\n');
+  assert.ok(/<code>\.nsr\uE000[\uE010-\uE019]*\uE001\.knowledge<\/code>/.test(html), html);
+  assert.ok(/<strong>three\uE000[\uE010-\uE019]*\uE001 pieces<\/strong>/.test(html), html);
+});
