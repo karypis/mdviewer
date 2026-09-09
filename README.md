@@ -181,20 +181,33 @@ Only the `GK` half is yours to change. Set your initials to `AB` under
 
 **Work with existing comments.** Any file that already contains review comments,
 whatever initials they carry, renders them as margin cards on open. Click a card
-to scroll to and highlight its anchor word. Each card carries **edit** and
-**delete** links. The **Clear Comments** toolbar button, which appears only when
-the file has comments, removes every one of them in a single step after a
-confirmation. HTML comments that are not review comments, such as
+to scroll to and highlight its anchor span. Each card carries **reply**,
+**edit**, and **delete** links. The **Clear Comments** toolbar button, which
+appears only when the file has comments, removes every one of them in a single
+step after a confirmation. HTML comments that are not review comments, such as
 `<!-- prettier-ignore -->`, are never touched.
 
-**Audit trail.** A comment can carry a response, separated by a slash:
+**Discussion threads.** A comment can carry a discussion. Each reply is a
+`/ TAG: text` segment appended to the same comment, in order. A reply to a reply
+is the next segment:
 
 ```
-<!-- GK-FIX: this should be O(n log n) / CLAUDE: fixed in c3a91f0 -->
+<!-- GK-FIX: this should be O(n log n) / CLAUDE: fixed in c3a91f0 / GK: also update the proof / CLAUDE: done -->
 ```
 
-The card shows the response as a green reply block below your note. `CLAUDE` is
-the default responder name and is configurable.
+Click **reply** on a card to append a segment with your tag. The card shows the
+thread as nested rows: each reply is indented one level inside the previous one,
+with a vertical side line per level, so the order of the exchange is visible.
+Every reply row has its own **edit** and **delete** links. Editing the root note
+keeps the thread.
+Replies tagged with the responder name (`CLAUDE` by default, configurable) are
+colored green; all other replies carry the gray tag of whoever wrote them. The
+older single-response audit trail is the one-reply case of this format.
+
+**Long comments.** A card whose full height would push the next card below its
+own anchor is collapsed to about three lines with a **more** link. Clicking the
+card, or **more**, shows it in full and moves the cards below it down. **less**
+folds it again. Short cards, and cards with room below them, never collapse.
 
 **Sharing a file.** The renderer accepts *any* initials-style tag, so
 `<!-- AB: ... -->` and `<!-- AB-FIX: ... -->` show up as cards alongside yours,
@@ -322,8 +335,11 @@ reads:
 - A colon separates the tag from the body. Whitespace around both is optional.
 - Lowercase tooling comments (`<!-- prettier-ignore -->`) and tags with no colon
   never match, so mdviewer leaves them alone.
-- An optional `/ RESPONDER:` inside the body splits it into a note and a
-  response. `RESPONDER` defaults to `CLAUDE` and is configurable too.
+- Each ` / TAG: ` inside the body starts a reply. The text before the first one
+  is the root note; the replies follow in order. The slash needs whitespace on
+  both sides and a tag after it, so `a/b` and `http://x/y` never split.
+- Replies tagged with the responder name (`CLAUDE` by default, configurable)
+  are colored as the responder's.
 
 The app renders *every* tag matching that grammar, not just yours. It writes new
 comments with the initials you configured. That is what lets two people comment
@@ -392,7 +408,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 142-check self-test inside the Electron bundle
+npm run selftest       # run the 165-check self-test inside the Electron bundle
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -437,8 +453,8 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
-node --test tests/*.test.js  # 74 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 142 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
+node --test tests/*.test.js  # 77 unit + integration tests (pure logic + shipped file)
+bash tools/selftest.sh       # 165 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test

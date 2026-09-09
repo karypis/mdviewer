@@ -336,13 +336,29 @@ body {
 .comment-card.gk-q .tag { color: var(--gk-q); }
 .comment-card.gk-nit .tag { color: var(--gk-nit); }
 .comment-card .body { color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
-.comment-card .claude {
-  margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);
-  color: var(--gk-claude);
+/* thread: each reply nests inside the previous one; every level steps in and
+   draws its own side line, colored by who wrote it */
+.comment-card .reply {
+  margin-top: 6px; margin-left: 4px; padding-left: 8px;
+  border-left: 2px solid var(--text-dim);
 }
-.comment-card .claude .tag { color: var(--gk-claude); }
+.comment-card .reply .tag { color: var(--text-dim); }
+.comment-card .reply.responder { border-left-color: var(--gk-claude); }
+.comment-card .reply.responder .tag { color: var(--gk-claude); }
+/* past four levels stop stepping in (the margin is narrow); lines still nest */
+.comment-card .reply .reply .reply .reply .reply { margin-left: 0; padding-left: 6px; }
+.comment-card .reply .actions { margin-top: 3px; }
 .comment-card .actions { margin-top: 6px; display: none; gap: 10px; }
 .comment-card.active .actions { display: flex; }
+/* collapsed: fixed height, faded tail, "more" toggle (see layoutCards) */
+.comment-card.collapsed { max-height: 56px; overflow: hidden; }
+.comment-card.collapsed::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+  background: linear-gradient(to bottom, transparent, var(--surface2)); pointer-events: none;
+}
+.comment-card .more { display: none; font-size: 11px; color: var(--accent); cursor: pointer; }
+.comment-card.collapsed .more { display: block; position: absolute; right: 8px; bottom: 3px; z-index: 1; }
+.comment-card.expanded .more { display: block; margin-top: 6px; }
 .comment-card .actions a { color: var(--text-dim); font-size: 11px; cursor: pointer; }
 .comment-card .actions a:hover { color: var(--accent); }
 .comment-card .actions a.del:hover { color: var(--danger); }
@@ -602,11 +618,12 @@ body {
     <p class="hint">New comments are written as
       <code>&lt;!-- <span id="prefixPreview">GK</span>: your note --&gt;</code>.
       The kinds add a suffix: <code>-FIX</code>, <code>-Q</code>, <code>-NIT</code>.</p>
-    <label>Audit-trail responder
+    <label>Responder tag
       <input id="setResponder" maxlength="16" autocomplete="off" spellcheck="false">
     </label>
-    <p class="hint">When a comment is addressed, the reply tag is
-      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.
+    <p class="hint">Replies in a thread are stored as
+      <code>… / TAG: reply --&gt;</code> segments. Replies tagged
+      <code><span id="respPreview">CLAUDE</span></code> are colored as the responder.
       Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>
@@ -2016,28 +2033,39 @@ return He}()
     return 'gk';
   }
 
-  // Parse every review comment in `source`. Each result has the tag, the human
-  // body, an optional audit-trail response (split on `/ <responder>:`, default
-  // responder "CLAUDE"), the span (number of words the comment highlights, from
-  // a trailing `SPAN:N` field; 1 when absent), the variant css class, and the
-  // exact [start,end) byte range of the whole `<!-- ... -->` token.
+  // Parse every review comment in `source`. Each result has the tag, the root
+  // body, the discussion thread (`replies`: the ` / TAG: text` segments that
+  // follow the root, in order; the legacy audit trail `/ CLAUDE: response` is
+  // a one-reply thread), the span (number of words the comment highlights, from
+  // a trailing `SPAN:N` field on the root; 1 when absent), the variant css
+  // class, and the exact [start,end) byte range of the whole `<!-- ... -->`.
   var SPAN_RE = /\s*\bSPAN:(\d+)\s*$/;
+  // A reply boundary: whitespace, a slash, whitespace, then a tag and colon.
+  var REPLY_RE = /\s+\/\s+([A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)\s*:\s*/g;
 
-  function parseComments(source, responder) {
-    var respRe = new RegExp('\\s*/\\s*' + escapeRegExp(responder || 'CLAUDE') + '\\s*:\\s*');
+  // Split a comment's inner text into { body, replies: [{tag, body}] }.
+  function splitThread(inner) {
+    var replies = [], last = 0, body = null, pendingTag = null, rm;
+    REPLY_RE.lastIndex = 0;
+    while ((rm = REPLY_RE.exec(inner)) !== null) {
+      var text = inner.slice(last, rm.index).trim();
+      if (body === null) body = text; else replies.push({ tag: pendingTag, body: text });
+      pendingTag = rm[1];
+      last = rm.index + rm[0].length;
+    }
+    var tail = inner.slice(last).trim();
+    if (body === null) body = tail; else replies.push({ tag: pendingTag, body: tail });
+    return { body: body, replies: replies };
+  }
+
+  function parseComments(source) {
     var out = [];
     COMMENT_RE.lastIndex = 0;
     var m;
     while ((m = COMMENT_RE.exec(source)) !== null) {
       var tag = m[1];
-      var inner = m[2];
-      var body = inner;
-      var claude = null;
-      var parts = inner.split(respRe);
-      if (parts.length === 2) {
-        body = parts[0].trim();
-        claude = parts[1].trim();
-      }
+      var thread = splitThread(m[2]);
+      var body = thread.body;
       var span = 1;
       var sm = body.match(SPAN_RE);
       if (sm) {
@@ -2048,7 +2076,7 @@ return He}()
         tag: tag,
         variant: variantClass(tag),
         body: body,
-        claude: claude,
+        replies: thread.replies,
         span: span,
         start: m.index,
         end: m.index + m[0].length,
@@ -2084,15 +2112,20 @@ return He}()
     return s;
   }
 
-  // Build the exact bytes of a GK comment from a tag, body, and span (word
-  // count of the highlighted selection). A span of 1 (or none) writes the bare
-  // form, so single-word comments stay byte-identical to the old convention.
-  function serializeComment(tag, body, span) {
+  // Build the exact bytes of a GK comment from a tag, root body, span (word
+  // count of the highlighted selection), and reply thread. A span of 1 (or
+  // none) writes no field and an empty thread writes no segments, so a plain
+  // single-word comment stays byte-identical to the old convention.
+  function serializeComment(tag, body, span, replies) {
     var t = (tag || 'GK').trim();
     var b = String(body == null ? '' : body).trim();
     var n = parseInt(span, 10);
-    var field = (n > 1) ? ' SPAN:' + n : '';
-    return '<!-- ' + t + ': ' + b + field + ' -->';
+    var s = '<!-- ' + t + ': ' + b + ((n > 1) ? ' SPAN:' + n : '');
+    for (var i = 0; replies && i < replies.length; i++) {
+      var rb = String(replies[i].body == null ? '' : replies[i].body).trim();
+      s += ' / ' + (replies[i].tag || 'GK').trim() + ': ' + rb;
+    }
+    return s + ' -->';
   }
 
   // Comment markers are injected into a block's markdown as an invisible TEXT
@@ -3059,13 +3092,14 @@ return He}()
   // ---- core render ------------------------------------------------------
   function setSource(text) {
     state.source = text;
+    state.expanded = {}; // per-card collapse overrides do not carry across files
     state.detectedWidth = MDCore.detectWrapWidth(text); // learn the file's wrap column
     relex();
     renderAll();
   }
   function relex() {
     state.blocks = MDCore.lexBlocks(state.source);
-    state.comments = MDCore.parseComments(state.source, app.settings.responder);
+    state.comments = MDCore.parseComments(state.source);
     for (var i = 0; i < state.comments.length; i++) state.comments[i].id = i;
   }
 
@@ -3237,29 +3271,63 @@ return He}()
     body.textContent = c.body;
     card.appendChild(tag);
     card.appendChild(body);
-    if (c.claude) {
-      var cl = document.createElement('div');
-      cl.className = 'claude';
-      var ct = document.createElement('span'); ct.className = 'tag'; ct.textContent = app.settings.responder;
-      var cb = document.createElement('div'); cb.className = 'body'; cb.textContent = c.claude;
-      cl.appendChild(ct); cl.appendChild(cb); card.appendChild(cl);
+    // Each reply nests inside the previous one, so successive messages step
+    // in by one level and each level draws its own vertical side line (CSS).
+    var parent = card;
+    for (var ri = 0; ri < c.replies.length; ri++) {
+      var row = buildReply(c, ri);
+      parent.appendChild(row);
+      parent = row;
     }
     var actions = document.createElement('div');
     actions.className = 'actions';
+    var rep = document.createElement('a'); rep.textContent = 'reply';
     var edit = document.createElement('a'); edit.textContent = 'edit';
     var del = document.createElement('a'); del.className = 'del'; del.textContent = 'delete';
+    rep.addEventListener('click', function (e) { e.stopPropagation(); replyToComment(c); });
     edit.addEventListener('click', function (e) { e.stopPropagation(); editComment(c); });
     del.addEventListener('click', function (e) { e.stopPropagation(); deleteComment(c); });
-    actions.appendChild(edit); actions.appendChild(del);
+    actions.appendChild(rep); actions.appendChild(edit); actions.appendChild(del);
     card.appendChild(actions);
+    // collapse toggle; layoutCards decides when it shows and what it says
+    var more = document.createElement('a'); more.className = 'more'; more.textContent = 'more';
+    more.addEventListener('click', function (e) { e.stopPropagation(); toggleExpand(c.id); });
+    card.appendChild(more);
     card.addEventListener('click', function () { focusComment(c.id); });
     return card;
+  }
+
+  // One reply in a card's thread, with its own edit/delete links. A reply
+  // tagged with the configured responder takes the responder color.
+  function buildReply(c, i) {
+    var r = c.replies[i];
+    var el = document.createElement('div');
+    el.className = 'reply' + (r.tag === app.settings.responder ? ' responder' : '');
+    var rt = document.createElement('span'); rt.className = 'tag'; rt.textContent = r.tag;
+    var rb = document.createElement('div'); rb.className = 'body'; rb.textContent = r.body;
+    var ra = document.createElement('div'); ra.className = 'actions';
+    var re = document.createElement('a'); re.textContent = 'edit';
+    var rd = document.createElement('a'); rd.className = 'del'; rd.textContent = 'delete';
+    re.addEventListener('click', function (e) { e.stopPropagation(); editReply(c, i); });
+    rd.addEventListener('click', function (e) { e.stopPropagation(); deleteReply(c, i); });
+    ra.appendChild(re); ra.appendChild(rd);
+    el.appendChild(rt); el.appendChild(rb); el.appendChild(ra);
+    return el;
   }
 
   // Position cards next to their anchor, pushing down to avoid overlap. Cards
   // live in `inner`, a spacer the full height of the document, so #margin scrolls
   // (kept in sync with the document) instead of overflowing the viewport.
+  //
+  // Collapse rule: a card whose full height would push the NEXT card below its
+  // own anchor is collapsed to a fixed height (CSS .collapsed) with a "more"
+  // toggle, so long comments do not displace the cards that follow. The user's
+  // toggle (state.expanded[id] true/false) always wins; otherwise the active
+  // card is shown in full and every other overlapping card collapses.
+  var COLLAPSE_MIN_H = 90; // px: shorter cards gain nothing from collapsing
   function layoutCards(cards, inner) {
+    state._layout = { cards: cards, inner: inner };
+    state.expanded = state.expanded || {};
     var docRect = docEl.getBoundingClientRect();
     var prevBottom = 8;
     var measured = cards.map(function (item) {
@@ -3272,17 +3340,43 @@ return He}()
     });
     measured.sort(function (a, b) { return a.top - b.top; });
     for (var i = 0; i < measured.length; i++) {
+      var card = measured[i].card, id = card.dataset.id;
       var t = Math.max(measured[i].top, prevBottom);
-      measured[i].card.style.top = t + 'px';
-      prevBottom = t + measured[i].card.offsetHeight + 8;
+      card.classList.remove('collapsed', 'expanded');
+      var fullH = card.offsetHeight;
+      var next = measured[i + 1];
+      var wouldPush = !!next && (t + fullH + 8 > next.top);
+      var pref = state.expanded[id]; // true / false / undefined
+      var pinned = pref === true || (pref !== false && String(state.activeComment) === String(id));
+      if (wouldPush && fullH > COLLAPSE_MIN_H) {
+        card.classList.add(pinned ? 'expanded' : 'collapsed');
+      }
+      var more = card.querySelector('.more');
+      if (more) more.textContent = card.classList.contains('collapsed') ? 'more' : 'less';
+      card.style.top = t + 'px';
+      prevBottom = t + card.offsetHeight + 8;
     }
     inner.style.height = docEl.scrollHeight + 'px';
   }
 
+  function relayoutCards() {
+    if (state._layout) layoutCards(state._layout.cards, state._layout.inner);
+  }
+
+  function toggleExpand(id) {
+    var card = marginEl.querySelector('.comment-card[data-id="' + id + '"]');
+    var shownFull = !(card && card.classList.contains('collapsed'));
+    state.expanded[id] = !shownFull;
+    relayoutCards();
+  }
+
   function focusComment(id) {
     state.activeComment = id;
+    // clicking a card always shows it in full, even after an explicit "less"
+    if (state.expanded && state.expanded[id] === false) delete state.expanded[id];
     var cards = marginEl.querySelectorAll('.comment-card');
     for (var i = 0; i < cards.length; i++) cards[i].classList.toggle('active', cards[i].dataset.id == id);
+    relayoutCards(); // the active card is shown in full
     var range = state._ranges && state._ranges[id];
     if (range && typeof Highlight !== 'undefined' && CSS.highlights && !range.collapsed) {
       var hl = new Highlight(); hl.add(range); CSS.highlights.set('gk-span-active', hl);
@@ -3343,10 +3437,36 @@ return He}()
     openComposer({ type: 'new', pos: pos, span: span }, '', app.settings.prefix, ps.rect);
   }
 
-  function editComment(c) {
+  function markerRect(c) {
     var marker = docEl.querySelector('.gkmark[data-gk="' + c.id + '"]');
-    var rect = marker ? marker.getBoundingClientRect() : null;
-    openComposer({ type: 'edit', comment: c }, c.body, c.tag, rect);
+    return marker ? marker.getBoundingClientRect() : null;
+  }
+
+  function editComment(c) {
+    openComposer({ type: 'edit', comment: c }, c.body, c.tag, markerRect(c));
+  }
+
+  // Append a reply to the comment's thread (a reply to a reply is the next
+  // segment of the same thread).
+  function replyToComment(c) {
+    openComposer({ type: 'reply', comment: c }, '', app.settings.prefix, markerRect(c));
+  }
+
+  function editReply(c, i) {
+    openComposer({ type: 'edit-reply', comment: c, index: i }, c.replies[i].body, c.replies[i].tag, markerRect(c));
+  }
+
+  function deleteReply(c, i) {
+    var replies = c.replies.slice();
+    replies.splice(i, 1);
+    rewriteComment(c, MDCore.serializeComment(c.tag, c.body, c.span, replies));
+  }
+
+  // Replace a comment's bytes in the source, re-wrap its host block, save.
+  function rewriteComment(c, text) {
+    state.source = MDCore.spliceSource(state.source, c.start, c.end, text);
+    state.source = MDCore.rewrapAt(state.source, c.start, effectiveWrap());
+    relex(); renderAll(); scheduleSave(true);
   }
 
   function deleteComment(c) {
@@ -3510,6 +3630,7 @@ return He}()
     sel.value = want;
     var ta = composer.querySelector('textarea');
     ta.value = body || '';
+    ta.placeholder = (mode.type === 'reply' || mode.type === 'edit-reply') ? 'Reply…' : 'Comment…';
     var wrapRect = docwrap.getBoundingClientRect();
     var rect = anchorRect;
     // Ignore an empty/zero rect (e.g. a display:none element) and fall back.
@@ -3533,15 +3654,24 @@ return He}()
     var tag = composer.querySelector('select').value;
     var body = composer.querySelector('textarea').value.trim();
     if (!body) { closeComposer(); return; }
-    var span = mode.type === 'new' ? mode.span : mode.comment.span;
-    var text = MDCore.serializeComment(tag, body, span);
-    var at;
+    var text, at;
     if (mode.type === 'new') {
+      text = MDCore.serializeComment(tag, body, mode.span);
       at = mode.pos;
       state.source = MDCore.spliceSource(state.source, mode.pos, mode.pos, text);
     } else {
-      at = mode.comment.start;
-      state.source = MDCore.spliceSource(state.source, mode.comment.start, mode.comment.end, text);
+      var c = mode.comment, replies = c.replies.slice();
+      if (mode.type === 'edit') {
+        text = MDCore.serializeComment(tag, body, c.span, replies);
+      } else if (mode.type === 'reply') {
+        replies.push({ tag: tag, body: body });
+        text = MDCore.serializeComment(c.tag, c.body, c.span, replies);
+      } else { // edit-reply
+        replies[mode.index] = { tag: tag, body: body };
+        text = MDCore.serializeComment(c.tag, c.body, c.span, replies);
+      }
+      at = c.start;
+      state.source = MDCore.spliceSource(state.source, c.start, c.end, text);
     }
     // Splicing a comment into a paragraph can overrun the wrap column; re-wrap
     // its host block so the saved line stays within the constraint.
@@ -3956,7 +4086,7 @@ return He}()
       check('code highlighted (hljs)', !!docEl.querySelector('pre code.hljs'));
       check('comment markers present', docEl.querySelectorAll('.gkmark').length === 5);
       check('margin cards present', marginEl.querySelectorAll('.comment-card').length === 5);
-      check('audit-trail CLAUDE shown', !!marginEl.querySelector('.comment-card .claude'));
+      check('audit-trail CLAUDE shown as a responder reply', !!marginEl.querySelector('.comment-card .reply.responder'));
       check('variant class applied', !!marginEl.querySelector('.comment-card.gk-fix'));
       check('CSS custom highlight registered',
         typeof Highlight !== 'undefined' && CSS.highlights && CSS.highlights.has('gk-span'));
@@ -4039,7 +4169,88 @@ return He}()
         submitComposer();
         check('edit preserves SPAN field',
           state.source.indexOf('computes<!-- GK-Q: which algorithm, exactly? SPAN:4 --> an initial partition') !== -1);
+
+        // --- discussion thread: reply, reply to the reply, edit, delete ---
+        var byBody = function (b) { return state.comments.filter(function (c) { return c.body === b; })[0]; };
+        var tc = byBody('which algorithm, exactly?');
+        replyToComment(tc);
+        check('reply composer defaults to the configured prefix', composer.querySelector('select').value === 'GK');
+        check('reply composer shows a reply placeholder', composer.querySelector('textarea').placeholder === 'Reply…');
+        composer.querySelector('textarea').value = 'because X';
+        submitComposer();
+        check('reply appended as a / TAG: segment',
+          state.source.indexOf('<!-- GK-Q: which algorithm, exactly? SPAN:4 / GK: because X -->') !== -1);
+        tc = byBody('which algorithm, exactly?');
+        check('reply parsed into the thread', tc && tc.replies.length === 1 && tc.replies[0].body === 'because X');
+        var tcard = marginEl.querySelector('.comment-card[data-id="' + tc.id + '"]');
+        check('card renders one reply row', tcard && tcard.querySelectorAll('.reply').length === 1);
+        replyToComment(tc);
+        composer.querySelector('select').value = 'GK-FIX';
+        composer.querySelector('textarea').value = 'then fix it';
+        submitComposer();
+        check('reply to the reply is the next segment',
+          state.source.indexOf('SPAN:4 / GK: because X / GK-FIX: then fix it -->') !== -1);
+        tc = byBody('which algorithm, exactly?');
+        tcard = marginEl.querySelector('.comment-card[data-id="' + tc.id + '"]');
+        var nested = tcard.querySelector(':scope > .reply > .reply');
+        check('second reply nests one level inside the first', !!nested && nested.querySelector('.tag').textContent === 'GK-FIX');
+        check('nested reply is indented past its parent',
+          nested.getBoundingClientRect().left > nested.parentNode.getBoundingClientRect().left);
+        tc = byBody('which algorithm, exactly?');
+        editReply(tc, 0);
+        check('edit-reply composer carries the reply text', composer.querySelector('textarea').value === 'because X');
+        composer.querySelector('textarea').value = 'because Y';
+        submitComposer();
+        check('editing a reply rewrites only that segment',
+          state.source.indexOf('SPAN:4 / GK: because Y / GK-FIX: then fix it -->') !== -1);
+        tc = byBody('which algorithm, exactly?');
+        deleteReply(tc, 1);
+        check('deleting a reply removes only that segment',
+          state.source.indexOf('SPAN:4 / GK: because Y -->') !== -1);
+        tc = byBody('which algorithm, exactly?');
+        editComment(tc);
+        composer.querySelector('textarea').value = 'which algorithm?';
+        submitComposer();
+        check('editing the root keeps the thread',
+          state.source.indexOf('<!-- GK-Q: which algorithm? SPAN:4 / GK: because Y -->') !== -1);
       }
+
+      // --- collapse: a long card that would displace the next one folds ---
+      (function () {
+        var keep = state.source; // the sections below expect the sample document
+        var long = [];
+        for (var w = 0; w < 80; w++) long.push('word' + w);
+        setSource('First para with a<!-- GK: ' + long.join(' ') + ' --> note here.\n\n' +
+          'Second para with a<!-- GK: short --> note.\n');
+        var c1 = state.comments[0], c2 = state.comments[1];
+        var k1 = marginEl.querySelector('.comment-card[data-id="' + c1.id + '"]');
+        var k2 = marginEl.querySelector('.comment-card[data-id="' + c2.id + '"]');
+        check('long card collapses when it would overlap the next card',
+          k1.classList.contains('collapsed') && k1.offsetHeight <= COLLAPSE_MIN_H);
+        var more1 = k1.querySelector('.more');
+        check('collapsed card shows a "more" toggle',
+          more1 && getComputedStyle(more1).display !== 'none' && more1.textContent === 'more');
+        check('short card is not collapsed', !k2.classList.contains('collapsed'));
+        check('next card still sits at or below the collapsed card',
+          parseFloat(k2.style.top) >= parseFloat(k1.style.top) + k1.offsetHeight);
+        toggleExpand(c1.id);
+        check('"more" expands the card past the cap',
+          !k1.classList.contains('collapsed') && k1.classList.contains('expanded') && k1.offsetHeight > COLLAPSE_MIN_H);
+        check('expanded card shows "less"', more1.textContent === 'less');
+        check('expanded card pushes the next card down',
+          parseFloat(k2.style.top) >= parseFloat(k1.style.top) + k1.offsetHeight);
+        toggleExpand(c1.id);
+        check('"less" collapses it again', k1.classList.contains('collapsed'));
+        focusComment(c2.id);
+        focusComment(c1.id);
+        check('clicking a collapsed card shows it in full', !k1.classList.contains('collapsed'));
+        focusComment(c2.id);
+        check('clicking away collapses it again', k1.classList.contains('collapsed'));
+        toggleExpand(c1.id); toggleExpand(c1.id); // explicit "less" ...
+        focusComment(c1.id);
+        check('clicking a card after "less" still shows it in full', !k1.classList.contains('collapsed'));
+        setSource(keep);
+      })();
 
       // --- block editing: edit the heading block, only it should change ---
       var beforeEdit = state.source;
@@ -4189,10 +4400,11 @@ return He}()
       check('renders comments from multiple prefixes', state.comments.length === 3);
       var fix = state.comments.filter(function (c) { return c.tag === 'AB-FIX'; })[0];
       check('AB-FIX colored as a fix (amber)', fix && fix.variant === 'gk-fix');
-      var audit = state.comments.filter(function (c) { return c.claude; })[0];
-      check('custom responder ME splits audit trail', audit && audit.claude === 'done');
-      var card = marginEl.querySelector('.comment-card .claude .tag');
-      check('audit card shows the custom responder label', card && card.textContent === 'ME');
+      var audit = state.comments.filter(function (c) { return c.replies.length; })[0];
+      check('audit trail parses as a one-reply thread',
+        audit && audit.replies.length === 1 && audit.replies[0].tag === 'ME' && audit.replies[0].body === 'done');
+      var card = marginEl.querySelector('.comment-card .reply.responder .tag');
+      check('reply from the custom responder is colored as the responder', card && card.textContent === 'ME');
       // a new comment must default to YOUR prefix, not a hardcoded "GK"
       var pw = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null), ptn = null, pn;
       while ((pn = pw.nextNode())) { if (pn.nodeValue.indexOf('Para') !== -1) { ptn = pn; break; } }

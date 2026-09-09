@@ -320,13 +320,29 @@ body {
 .comment-card.gk-q .tag { color: var(--gk-q); }
 .comment-card.gk-nit .tag { color: var(--gk-nit); }
 .comment-card .body { color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
-.comment-card .claude {
-  margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);
-  color: var(--gk-claude);
+/* thread: each reply nests inside the previous one; every level steps in and
+   draws its own side line, colored by who wrote it */
+.comment-card .reply {
+  margin-top: 6px; margin-left: 4px; padding-left: 8px;
+  border-left: 2px solid var(--text-dim);
 }
-.comment-card .claude .tag { color: var(--gk-claude); }
+.comment-card .reply .tag { color: var(--text-dim); }
+.comment-card .reply.responder { border-left-color: var(--gk-claude); }
+.comment-card .reply.responder .tag { color: var(--gk-claude); }
+/* past four levels stop stepping in (the margin is narrow); lines still nest */
+.comment-card .reply .reply .reply .reply .reply { margin-left: 0; padding-left: 6px; }
+.comment-card .reply .actions { margin-top: 3px; }
 .comment-card .actions { margin-top: 6px; display: none; gap: 10px; }
 .comment-card.active .actions { display: flex; }
+/* collapsed: fixed height, faded tail, "more" toggle (see layoutCards) */
+.comment-card.collapsed { max-height: 56px; overflow: hidden; }
+.comment-card.collapsed::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+  background: linear-gradient(to bottom, transparent, var(--surface2)); pointer-events: none;
+}
+.comment-card .more { display: none; font-size: 11px; color: var(--accent); cursor: pointer; }
+.comment-card.collapsed .more { display: block; position: absolute; right: 8px; bottom: 3px; z-index: 1; }
+.comment-card.expanded .more { display: block; margin-top: 6px; }
 .comment-card .actions a { color: var(--text-dim); font-size: 11px; cursor: pointer; }
 .comment-card .actions a:hover { color: var(--accent); }
 .comment-card .actions a.del:hover { color: var(--danger); }

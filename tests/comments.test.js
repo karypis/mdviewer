@@ -30,20 +30,48 @@ test('parseComments: ignores lowercase tooling comments and colon-less tags', ()
   assert.strictEqual(MDCore.parseComments(src).length, 0);
 });
 
-test('parseComments: audit-trail split, default and custom responder', () => {
+test('parseComments: legacy audit trail parses as a one-reply thread', () => {
   const src = 'x <!-- GK: original / CLAUDE: addressed by Y --> z\n';
   const cs = MDCore.parseComments(src);
   assert.strictEqual(cs[0].body, 'original');
-  assert.strictEqual(cs[0].claude, 'addressed by Y');
-  // custom responder name
-  const src2 = 'x <!-- AB: note / ME: did it --> z\n';
-  const cs2 = MDCore.parseComments(src2, 'ME');
+  assert.deepStrictEqual(cs[0].replies, [{ tag: 'CLAUDE', body: 'addressed by Y' }]);
+  // any initials-style tag can reply, not only the configured responder
+  const cs2 = MDCore.parseComments('x <!-- AB: note / ME: did it --> z\n');
   assert.strictEqual(cs2[0].body, 'note');
-  assert.strictEqual(cs2[0].claude, 'did it');
-  // wrong responder -> no split (whole thing is the body)
-  const cs3 = MDCore.parseComments(src2, 'CLAUDE');
-  assert.strictEqual(cs3[0].claude, null);
-  assert.match(cs3[0].body, /note \/ ME: did it/);
+  assert.deepStrictEqual(cs2[0].replies, [{ tag: 'ME', body: 'did it' }]);
+  // no reply -> empty thread
+  assert.deepStrictEqual(MDCore.parseComments('x <!-- GK: alone --> z\n')[0].replies, []);
+});
+
+test('parseComments: a multi-reply thread keeps order and tags', () => {
+  const src = 'x <!-- GK: why 406? SPAN:3 / CLAUDE: process count / GK: say so / CLAUDE: done --> z\n';
+  const cs = MDCore.parseComments(src);
+  assert.strictEqual(cs[0].body, 'why 406?');
+  assert.strictEqual(cs[0].span, 3);
+  assert.deepStrictEqual(cs[0].replies, [
+    { tag: 'CLAUDE', body: 'process count' },
+    { tag: 'GK', body: 'say so' },
+    { tag: 'CLAUDE', body: 'done' },
+  ]);
+});
+
+test('parseComments: slashes without a tag do not start a reply', () => {
+  const cs = MDCore.parseComments('x <!-- GK: see a/b and c / d, or http://x/y --> z\n');
+  assert.strictEqual(cs[0].body, 'see a/b and c / d, or http://x/y');
+  assert.deepStrictEqual(cs[0].replies, []);
+});
+
+test('serializeComment: writes the thread as / TAG: segments and round-trips', () => {
+  const replies = [{ tag: 'CLAUDE', body: 'process count' }, { tag: 'GK', body: 'say so' }];
+  const bytes = MDCore.serializeComment('GK', 'why 406?', 3, replies);
+  assert.strictEqual(bytes, '<!-- GK: why 406? SPAN:3 / CLAUDE: process count / GK: say so -->');
+  const cs = MDCore.parseComments('a ' + bytes + ' b');
+  assert.strictEqual(cs[0].body, 'why 406?');
+  assert.strictEqual(cs[0].span, 3);
+  assert.deepStrictEqual(cs[0].replies, replies);
+  assert.strictEqual(MDCore.serializeComment(cs[0].tag, cs[0].body, cs[0].span, cs[0].replies), bytes);
+  // an empty thread adds nothing
+  assert.strictEqual(MDCore.serializeComment('GK', 'note', 1, []), '<!-- GK: note -->');
 });
 
 test('parseComments: multiline comment body', () => {
@@ -194,11 +222,11 @@ test('parseComments: span defaults to 1 without the field', () => {
   assert.strictEqual(cs[0].body, 'note');
 });
 
-test('parseComments: SPAN sits before the audit-trail response', () => {
+test('parseComments: SPAN sits on the root, before the replies', () => {
   const cs = MDCore.parseComments('a <!-- GK: original SPAN:2 / CLAUDE: addressed --> b\n');
   assert.strictEqual(cs[0].body, 'original');
   assert.strictEqual(cs[0].span, 2);
-  assert.strictEqual(cs[0].claude, 'addressed');
+  assert.deepStrictEqual(cs[0].replies, [{ tag: 'CLAUDE', body: 'addressed' }]);
 });
 
 test('parseComments: SPAN mentioned mid-body is left alone', () => {

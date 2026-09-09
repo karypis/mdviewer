@@ -92,11 +92,12 @@
     <p class="hint">New comments are written as
       <code>&lt;!-- <span id="prefixPreview">GK</span>: your note --&gt;</code>.
       The kinds add a suffix: <code>-FIX</code>, <code>-Q</code>, <code>-NIT</code>.</p>
-    <label>Audit-trail responder
+    <label>Responder tag
       <input id="setResponder" maxlength="16" autocomplete="off" spellcheck="false">
     </label>
-    <p class="hint">When a comment is addressed, the reply tag is
-      <code>… / <span id="respPreview">CLAUDE</span>: response --&gt;</code>.
+    <p class="hint">Replies in a thread are stored as
+      <code>… / TAG: reply --&gt;</code> segments. Replies tagged
+      <code><span id="respPreview">CLAUDE</span></code> are colored as the responder.
       Comments from anyone using initials-style tags
       (<code>&lt;!-- AB: … --&gt;</code>) are shown too, so a shared file renders
       everyone's notes.</p>

@@ -147,8 +147,17 @@ when leaving the comment. It is written only when N is greater than 1, so one-wo
 comments keep the bare form. The field is stripped from the displayed body.
 
 The viewer also recognizes and renders your documented variants — `GK-FIX:`, `GK-Q:`,
-`GK-NIT:` — and the audit-trail form `<!-- GK: original / CLAUDE: response -->`. New
-comments default to the `GK:` tag, with a small dropdown to pick a variant.
+`GK-NIT:` — and discussion threads. A thread is a linear chain of ` / TAG: text`
+segments appended to the root comment, in order; a reply to a reply is the next
+segment. The audit-trail form `<!-- GK: original / CLAUDE: response -->` is the
+one-reply case:
+
+```
+<!-- GK: why 406 here? SPAN:3 / CLAUDE: it is the process count / GK: then say so / CLAUDE: done -->
+```
+
+The `SPAN` field belongs to the root segment. New comments default to the `GK:` tag,
+with a small dropdown to pick a variant.
 
 ### 7.2 Creating a comment
 
@@ -188,10 +197,20 @@ byte-identical to your existing convention, with no extra markers ever written.
 
 ### 7.4 Editing and deleting comments
 
-- Each margin card has edit and delete affordances. Editing rewrites the comment text
-  in the source; deleting removes the `<!-- GK: ... -->` entirely (collapsing a blank
-  line left by a standalone comment). Both autosave and never touch surrounding
-  content.
+- Each margin card has reply, edit, and delete affordances. Editing rewrites the root
+  text in the source and keeps the thread; deleting removes the `<!-- GK: ... -->`
+  entirely (collapsing a blank line left by a standalone comment). Reply appends a
+  ` / TAG: text` segment with the user's configured tag. The card renders the thread
+  as nested rows: each reply is indented one level inside the previous one with a
+  vertical side line per level (indentation stops after four levels; the lines still
+  nest). Each reply row has its own edit and delete, which rewrite or remove only that
+  segment. All autosave and never touch surrounding content.
+
+- **Collapsing.** A card whose full height would push the next card below its own
+  anchor is collapsed to a fixed height (about three lines) with a "more" toggle.
+  Clicking the card or "more" shows it in full and pushes the cards below it down;
+  "less" folds it again. Cards shorter than the cap, and cards with room below them,
+  never collapse.
 
 - A **Clear Comments** toolbar action removes every GK comment from the file at once
   (after confirmation), leaving non-GK HTML comments untouched.

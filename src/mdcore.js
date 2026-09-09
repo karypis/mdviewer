@@ -93,28 +93,39 @@
     return 'gk';
   }
 
-  // Parse every review comment in `source`. Each result has the tag, the human
-  // body, an optional audit-trail response (split on `/ <responder>:`, default
-  // responder "CLAUDE"), the span (number of words the comment highlights, from
-  // a trailing `SPAN:N` field; 1 when absent), the variant css class, and the
-  // exact [start,end) byte range of the whole `<!-- ... -->` token.
+  // Parse every review comment in `source`. Each result has the tag, the root
+  // body, the discussion thread (`replies`: the ` / TAG: text` segments that
+  // follow the root, in order; the legacy audit trail `/ CLAUDE: response` is
+  // a one-reply thread), the span (number of words the comment highlights, from
+  // a trailing `SPAN:N` field on the root; 1 when absent), the variant css
+  // class, and the exact [start,end) byte range of the whole `<!-- ... -->`.
   var SPAN_RE = /\s*\bSPAN:(\d+)\s*$/;
+  // A reply boundary: whitespace, a slash, whitespace, then a tag and colon.
+  var REPLY_RE = /\s+\/\s+([A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)\s*:\s*/g;
 
-  function parseComments(source, responder) {
-    var respRe = new RegExp('\\s*/\\s*' + escapeRegExp(responder || 'CLAUDE') + '\\s*:\\s*');
+  // Split a comment's inner text into { body, replies: [{tag, body}] }.
+  function splitThread(inner) {
+    var replies = [], last = 0, body = null, pendingTag = null, rm;
+    REPLY_RE.lastIndex = 0;
+    while ((rm = REPLY_RE.exec(inner)) !== null) {
+      var text = inner.slice(last, rm.index).trim();
+      if (body === null) body = text; else replies.push({ tag: pendingTag, body: text });
+      pendingTag = rm[1];
+      last = rm.index + rm[0].length;
+    }
+    var tail = inner.slice(last).trim();
+    if (body === null) body = tail; else replies.push({ tag: pendingTag, body: tail });
+    return { body: body, replies: replies };
+  }
+
+  function parseComments(source) {
     var out = [];
     COMMENT_RE.lastIndex = 0;
     var m;
     while ((m = COMMENT_RE.exec(source)) !== null) {
       var tag = m[1];
-      var inner = m[2];
-      var body = inner;
-      var claude = null;
-      var parts = inner.split(respRe);
-      if (parts.length === 2) {
-        body = parts[0].trim();
-        claude = parts[1].trim();
-      }
+      var thread = splitThread(m[2]);
+      var body = thread.body;
       var span = 1;
       var sm = body.match(SPAN_RE);
       if (sm) {
@@ -125,7 +136,7 @@
         tag: tag,
         variant: variantClass(tag),
         body: body,
-        claude: claude,
+        replies: thread.replies,
         span: span,
         start: m.index,
         end: m.index + m[0].length,
@@ -161,15 +172,20 @@
     return s;
   }
 
-  // Build the exact bytes of a GK comment from a tag, body, and span (word
-  // count of the highlighted selection). A span of 1 (or none) writes the bare
-  // form, so single-word comments stay byte-identical to the old convention.
-  function serializeComment(tag, body, span) {
+  // Build the exact bytes of a GK comment from a tag, root body, span (word
+  // count of the highlighted selection), and reply thread. A span of 1 (or
+  // none) writes no field and an empty thread writes no segments, so a plain
+  // single-word comment stays byte-identical to the old convention.
+  function serializeComment(tag, body, span, replies) {
     var t = (tag || 'GK').trim();
     var b = String(body == null ? '' : body).trim();
     var n = parseInt(span, 10);
-    var field = (n > 1) ? ' SPAN:' + n : '';
-    return '<!-- ' + t + ': ' + b + field + ' -->';
+    var s = '<!-- ' + t + ': ' + b + ((n > 1) ? ' SPAN:' + n : '');
+    for (var i = 0; replies && i < replies.length; i++) {
+      var rb = String(replies[i].body == null ? '' : replies[i].body).trim();
+      s += ' / ' + (replies[i].tag || 'GK').trim() + ': ' + rb;
+    }
+    return s + ' -->';
   }
 
   // Comment markers are injected into a block's markdown as an invisible TEXT
