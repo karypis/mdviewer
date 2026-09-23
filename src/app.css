@@ -13,7 +13,6 @@
   --danger: #cc4444;
   --ok: #34a853;
   --warn: #e0a030;
-  --hl: rgba(74, 158, 255, 0.48);
   --hl-active: rgba(255, 200, 60, 0.85);
   /* GK variant accent colors */
   --gk: #4a9eff;
@@ -347,8 +346,14 @@ body {
 .comment-card .actions a:hover { color: var(--accent); }
 .comment-card .actions a.del:hover { color: var(--danger); }
 
-/* anchored span highlight (CSS Custom Highlight API) */
-::highlight(gk-span) { background-color: var(--hl); color: #fff; }
+/* anchored span highlights (CSS Custom Highlight API), one registry per
+   comment kind, tinted with that kind's card color (--gk, --gk-fix, --gk-q,
+   --gk-nit at 45% alpha). Text keeps its own color so it reads on both the
+   dark and the light reading panel. */
+::highlight(gk-span) { background-color: rgba(74, 158, 255, 0.45); color: inherit; }
+::highlight(gk-span-fix) { background-color: rgba(224, 160, 48, 0.45); color: inherit; }
+::highlight(gk-span-q) { background-color: rgba(176, 124, 255, 0.45); color: inherit; }
+::highlight(gk-span-nit) { background-color: rgba(136, 136, 136, 0.45); color: inherit; }
 /* the focused comment's span gets a bright amber marker with dark text */
 ::highlight(gk-span-active) { background-color: var(--hl-active); color: #1a1a1a; }
 /* find-in-document matches: all matches dim, current match bright */

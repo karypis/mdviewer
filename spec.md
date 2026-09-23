@@ -77,7 +77,7 @@ your existing apps.
   shows the document outline (headings) for quick navigation. Collapsible.
 
 - **Center.** The rendered document. Each top-level block is clickable to edit (Section
-  6). Commented spans are visually highlighted.
+  6). Commented spans are highlighted in the color of their comment's kind.
 
 - **Right margin.** One card per comment, vertically aligned to its anchored span.
   Clicking a card scrolls to and flashes the span; clicking a span highlights its

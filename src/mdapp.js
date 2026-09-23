@@ -788,6 +788,15 @@
   }
 
   // ---- comments: margin cards + anchored highlights --------------------
+  // One CSS custom highlight registry per comment kind, so the commented text
+  // is tinted in the same color as its card (see ::highlight rules in app.css).
+  var SPAN_HL = { 'gk': 'gk-span', 'gk-fix': 'gk-span-fix', 'gk-q': 'gk-span-q', 'gk-nit': 'gk-span-nit' };
+
+  function clearSpanHighlights() {
+    if (!CSS.highlights) return;
+    for (var k in SPAN_HL) CSS.highlights.delete(SPAN_HL[k]);
+  }
+
   function renderComments() {
     marginEl.innerHTML = '';
     if (!state.comments.length) {
@@ -795,13 +804,15 @@
       em.className = 'margin-empty';
       em.textContent = 'No comments. Select text in the document to add one.';
       marginEl.appendChild(em);
-      CSS.highlights && CSS.highlights.delete('gk-span');
+      clearSpanHighlights();
       return;
     }
     var inner = document.createElement('div');
     inner.id = 'marginInner';
     marginEl.appendChild(inner);
-    var spanHL = (typeof Highlight !== 'undefined') ? new Highlight() : null;
+    var canHL = (typeof Highlight !== 'undefined') && !!CSS.highlights;
+    var hls = {};
+    if (canHL) for (var k in SPAN_HL) hls[k] = new Highlight();
     state._ranges = {};
     var cards = [];
     for (var i = 0; i < state.comments.length; i++) {
@@ -809,14 +820,18 @@
       var marker = docEl.querySelector('.gkmark[data-gk="' + c.id + '"]');
       if (marker) {
         var range = anchorSpanRange(marker.closest('.block'), marker, c.span);
-        if (range && spanHL && !range.collapsed) spanHL.add(range);
+        if (range && canHL && !range.collapsed) (hls[c.variant] || hls.gk).add(range);
         state._ranges[c.id] = range;
       }
       var card = buildCard(c, marker);
       cards.push({ card: card, marker: marker });
       inner.appendChild(card);
     }
-    if (spanHL && CSS.highlights) CSS.highlights.set('gk-span', spanHL);
+    if (canHL) {
+      for (var v in SPAN_HL) {
+        if (hls[v].size) CSS.highlights.set(SPAN_HL[v], hls[v]); else CSS.highlights.delete(SPAN_HL[v]);
+      }
+    }
     layoutCards(cards, inner);
   }
 
@@ -1720,7 +1735,7 @@
         'Span para: the quick<!-- GK: three words SPAN:3 --> brown fox jumps over.\n\n' +
         '- list item one\n- list item two\n\n' +
         '| a | b |\n| - | - |\n| 1 | 2 |\n\n' +
-        '```js\nconst<!-- GK: in code SPAN:3 --> x = 1;\n```\n';
+        '```js\nconst<!-- GK-NIT: in code SPAN:3 --> x = 1;\n```\n';
       setSource(sample);
 
       check('blocks rendered', docEl.querySelectorAll('.block').length >= 7);
@@ -1763,7 +1778,11 @@
       check('code-block comment highlights "const x ="', cc && rtext(cc.id) === 'const x =');
       check('no marker token survives anywhere in the document', docEl.textContent.indexOf('\uE000') === -1);
       var hlset = CSS.highlights.get('gk-span');
-      check('one highlight range per anchored comment', hlset && hlset.size === 4);
+      check('plain GK comments share the blue registry (3 ranges)', hlset && hlset.size === 3);
+      var nitset = CSS.highlights.get('gk-span-nit');
+      check('the NIT comment is in the gray registry (1 range)', nitset && nitset.size === 1);
+      check('kinds with no comment register no highlight',
+        !CSS.highlights.has('gk-span-fix') && !CSS.highlights.has('gk-span-q'));
 
       // --- write path: select a phrase and insert a comment via real DOM ---
       var para = docEl.querySelectorAll('.block')[1];
@@ -1808,6 +1827,8 @@
         // highlight covers the whole selected span (SPAN:4), not just the anchor word
         var rng = state._ranges[nc.id];
         check('highlight is the full selected span', rng && rng.toString() === 'computes an initial partition');
+        var qset = CSS.highlights.get('gk-span-q');
+        check('a GK-Q comment tints its span in the purple registry', qset && qset.size === 1 && qset.has(rng));
         // editing the comment body preserves its span field
         editComment(nc);
         composer.querySelector('textarea').value = 'which algorithm, exactly?';
@@ -1982,6 +2003,8 @@
       check('comments exist before clear', state.comments.length > 0);
       clearAllComments();
       check('clear removed every comment', state.comments.length === 0);
+      check('clearing comments drops every span highlight registry',
+        ['gk-span', 'gk-span-fix', 'gk-span-q', 'gk-span-nit'].every(function (n) { return !CSS.highlights.has(n); }));
       check('no GK comment bytes remain', state.source.indexOf('<!-- GK') === -1);
       check('clear button hidden when no comments', $('clearComments').style.display === 'none');
 

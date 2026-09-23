@@ -190,9 +190,10 @@ Selections that cross inline markup work correctly. Selecting the rendered text
 `**reverse`, not at the end of the paragraph.
 
 **Kinds.** The dropdown offers four tags, each built from your configured
-initials plus a kind suffix. The suffix picks the card's color:
+initials plus a kind suffix. The suffix picks the color of the card and of the
+highlighted text in the document:
 
-| Tag | Meaning | Card color |
+| Tag | Meaning | Card and highlight color |
 |---|---|---|
 | `GK` | A plain note | Blue |
 | `GK-FIX` | Something to fix | Amber |
@@ -432,7 +433,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 203-check self-test inside the Electron bundle
+npm run selftest       # run the 216-check self-test inside the Electron bundle
 npm run test:links     # test desktop links with temporary documents
 npm run test:session   # kill the app and check that its tabs come back
 npm run dist           # build both .dmg files into electron/dist/
