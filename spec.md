@@ -212,6 +212,10 @@ byte-identical to your existing convention, with no extra markers ever written.
   "less" folds it again. Cards shorter than the cap, and cards with room below them,
   never collapse.
 
+- A **kind filter** above the margin, one chip per kind with its count, hides or shows
+  that kind's cards and highlights. It never changes the file and persists with the
+  settings.
+
 - A **Clear Comments** toolbar action removes every GK comment from the file at once
   (after confirmation), leaving non-GK HTML comments untouched.
 

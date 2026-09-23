@@ -16,12 +16,16 @@
     mono: "'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
   };
   var DEFAULT_SETTINGS = { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' };
+  // Comment kinds, in the order the filter bar shows them: css variant -> chip label.
+  var KIND_VARIANTS = [['gk', 'note'], ['gk-fix', 'fix'], ['gk-q', 'q'], ['gk-nit', 'nit']];
+  function allKindsShown() { return { 'gk': true, 'gk-fix': true, 'gk-q': true, 'gk-nit': true }; }
 
   // Window-level state: shared across every open tab in this window.
   var app = {
     dirHandle: null,      // the open folder (its tree fills the sidebar), or null
     startDir: null,       // directory handle used as the picker's startIn
-    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark' }, // comment style + wrap + appearance
+    settings: { prefix: 'GK', responder: 'CLAUDE', wrap: 'auto', font: 'system', size: 15, theme: 'dark',
+      kinds: allKindsShown() }, // comment style + wrap + appearance + which kinds are shown
     tabs: [],             // one document per open file
     active: -1,           // index into tabs of the visible document, or -1 (none)
   };
@@ -705,9 +709,10 @@
   function renderAll() {
     $('empty').style.display = state.source ? 'none' : 'flex';
     docEl.style.display = state.source ? 'block' : 'none';
-    if (!state.source) { marginEl.innerHTML = ''; return; }
+    if (!state.source) { marginEl.innerHTML = ''; renderKindBar(); return; }
     var scroll = docwrap.scrollTop; // preserve scroll across full re-render
     renderDocument();
+    renderKindBar();
     renderComments();
     if (!app.dirHandle) renderSidebarOutline();
     $('clearComments').style.display = state.comments.length ? 'inline-block' : 'none';
@@ -806,14 +811,61 @@
     for (var k in SPAN_HL) CSS.highlights.delete(SPAN_HL[k]);
   }
 
+  // The kind-visibility map, created on demand so a settings object restored
+  // from an older snapshot (no `kinds` field) shows every kind.
+  function kindsMap() { return app.settings.kinds || (app.settings.kinds = allKindsShown()); }
+
+  // Is this comment's kind switched on in the filter bar?
+  function kindShown(c) { return kindsMap()[c.variant] !== false; }
+
+  // The filter bar above the margin: one chip per kind with its count in the
+  // current document. Clicking a chip hides or shows that kind's cards and
+  // highlights; the file is untouched. The choice persists with the settings.
+  function renderKindBar() {
+    var bar = $('kindbar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    if (!state.source) return;
+    var counts = {};
+    for (var i = 0; i < state.comments.length; i++) {
+      counts[state.comments[i].variant] = (counts[state.comments[i].variant] || 0) + 1;
+    }
+    var kinds = kindsMap();
+    KIND_VARIANTS.forEach(function (kv) {
+      var variant = kv[0], label = kv[1];
+      var chip = document.createElement('span');
+      chip.className = 'kind-chip ' + variant + (kinds[variant] === false ? ' off' : '');
+      chip.dataset.kind = variant;
+      chip.title = (kinds[variant] === false ? 'Show ' : 'Hide ') + label.toUpperCase() + ' comments';
+      var dot = document.createElement('span'); dot.className = 'dot';
+      var name = document.createElement('span'); name.textContent = label;
+      var n = document.createElement('span'); n.className = 'n'; n.textContent = counts[variant] || 0;
+      chip.appendChild(dot); chip.appendChild(name); chip.appendChild(n);
+      chip.addEventListener('click', function () { toggleKind(variant); });
+      bar.appendChild(chip);
+    });
+  }
+
+  function toggleKind(variant) {
+    var kinds = kindsMap();
+    kinds[variant] = kinds[variant] === false;
+    persistSettings();
+    renderKindBar();
+    renderComments();
+  }
+
   function renderComments() {
     marginEl.innerHTML = '';
-    if (!state.comments.length) {
+    var shown = state.comments.filter(kindShown);
+    if (!shown.length) {
       var em = document.createElement('div');
       em.className = 'margin-empty';
-      em.textContent = 'No comments. Select text in the document to add one.';
+      em.textContent = state.comments.length
+        ? state.comments.length + ' comment(s) hidden by the kind filter above.'
+        : 'No comments. Select text in the document to add one.';
       marginEl.appendChild(em);
       clearSpanHighlights();
+      state._ranges = {};
       return;
     }
     var inner = document.createElement('div');
@@ -824,8 +876,8 @@
     if (canHL) for (var k in SPAN_HL) hls[k] = new Highlight();
     state._ranges = {};
     var cards = [];
-    for (var i = 0; i < state.comments.length; i++) {
-      var c = state.comments[i];
+    for (var i = 0; i < shown.length; i++) {
+      var c = shown[i];
       var marker = docEl.querySelector('.gkmark[data-gk="' + c.id + '"]');
       if (marker) {
         var range = anchorSpanRange(marker.closest('.block'), marker, c.span);
@@ -1146,6 +1198,11 @@
         if (s.font && FONTS[s.font]) app.settings.font = s.font;
         if (s.size != null) app.settings.size = cleanSize(s.size);
         if (s.theme) app.settings.theme = cleanTheme(s.theme);
+        if (s.kinds && typeof s.kinds === 'object') {
+          var kinds = allKindsShown();
+          for (var kk in kinds) if (s.kinds[kk] === false) kinds[kk] = false;
+          app.settings.kinds = kinds;
+        }
       }
     } catch (e) { /* defaults */ }
   }
@@ -1792,6 +1849,30 @@
       check('the NIT comment is in the gray registry (1 range)', nitset && nitset.size === 1);
       check('kinds with no comment register no highlight',
         !CSS.highlights.has('gk-span-fix') && !CSS.highlights.has('gk-span-q'));
+
+      // --- kind filter bar: chips with counts, toggling hides cards + highlights
+      var chips = $('kindbar').querySelectorAll('.kind-chip');
+      var chipCount = function (v) { return $('kindbar').querySelector('.kind-chip.' + v + ' .n').textContent; };
+      check('filter bar shows one chip per kind with counts',
+        chips.length === 4 && chipCount('gk') === '3' && chipCount('gk-fix') === '1' && chipCount('gk-nit') === '1' && chipCount('gk-q') === '0');
+      var cardsBefore = marginEl.querySelectorAll('.comment-card').length;
+      $('kindbar').querySelector('.kind-chip.gk').click();
+      check('turning a kind off hides its cards and highlights, keeps the rest',
+        marginEl.querySelectorAll('.comment-card').length === cardsBefore - 3 &&
+        !CSS.highlights.has('gk-span') && CSS.highlights.has('gk-span-nit') &&
+        $('kindbar').querySelector('.kind-chip.gk').classList.contains('off'));
+      check('hiding a kind leaves the file untouched', state.source.indexOf('<!-- GK: inline note -->') !== -1);
+      check('kind filter persists with the settings',
+        JSON.parse(localStorage.getItem('mdviewer.settings')).kinds.gk === false);
+      $('kindbar').querySelector('.kind-chip.gk-fix').click();
+      $('kindbar').querySelector('.kind-chip.gk-nit').click();
+      check('all kinds off shows a hidden-count notice instead of cards',
+        marginEl.querySelectorAll('.comment-card').length === 0 && /5 comment\(s\) hidden/.test(marginEl.textContent));
+      $('kindbar').querySelector('.kind-chip.gk').click();
+      $('kindbar').querySelector('.kind-chip.gk-fix').click();
+      $('kindbar').querySelector('.kind-chip.gk-nit').click();
+      check('turning kinds back on restores every card',
+        marginEl.querySelectorAll('.comment-card').length === cardsBefore && CSS.highlights.get('gk-span').size === 3);
 
       // --- write path: select a phrase and insert a comment via real DOM ---
       var para = docEl.querySelectorAll('.block')[1];

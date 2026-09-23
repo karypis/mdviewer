@@ -278,15 +278,44 @@ body {
 }
 
 /* ---- comment margin (Phase 3) ---- */
-#margin {
+/* column: a fixed kind-filter bar on top, the scrolling card margin below */
+#marginCol {
   width: var(--margin-w);
   flex: 0 0 auto;
+  display: flex; flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--surface);
+  min-height: 0;
+}
+#kindbar {
+  flex: 0 0 auto;
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+#kindbar:empty { display: none; }
+/* one chip per comment kind: tag name plus count; "off" hides that kind */
+.kind-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  cursor: pointer; user-select: none; color: var(--text);
+}
+.kind-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gk); }
+.kind-chip.gk-fix .dot { background: var(--gk-fix); }
+.kind-chip.gk-q .dot { background: var(--gk-q); }
+.kind-chip.gk-nit .dot { background: var(--gk-nit); }
+.kind-chip .n { color: var(--text-dim); font-weight: 500; }
+.kind-chip:hover { border-color: var(--accent); }
+.kind-chip.off { color: var(--text-dim); text-decoration: line-through; opacity: 0.7; }
+.kind-chip.off .dot { background: var(--border); }
+#margin {
+  flex: 1 1 auto;
   overflow-y: auto;
   position: relative;
+  min-height: 0;
 }
-#margin.hidden { display: none; }
 /* tall inner spacer holds the absolutely-positioned cards; #margin itself stays
    viewport-height and scrolls (kept in sync with the document scroll). */
 #marginInner { position: relative; width: 100%; }
@@ -469,7 +498,7 @@ body {
     height: auto !important; overflow: visible !important;
     background: #fff !important; color: #1a1a1a !important;
   }
-  #toolbar, #tabbar, #sidebar, #margin, #composer, #commentBtn, #toast,
+  #toolbar, #tabbar, #sidebar, #marginCol, #composer, #commentBtn, #toast,
   #searchbar, .gutter { display: none !important; }
   #shell { display: block !important; height: auto !important; min-height: 0 !important; }
   #docwrap { overflow: visible !important; height: auto !important; }

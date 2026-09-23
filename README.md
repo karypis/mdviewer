@@ -234,6 +234,12 @@ own anchor is collapsed to about three lines with a **more** link. Clicking the
 card, or **more**, shows it in full and moves the cards below it down. **less**
 folds it again. Short cards, and cards with room below them, never collapse.
 
+**Show only some kinds.** A row of four chips sits above the comment cards, one
+per kind, each with its count in the current file. Click a chip to hide that
+kind's cards and highlights; click again to show them. The file is not changed,
+and **Clear Comments** still removes every kind. The choice is remembered with
+your settings, so it applies to every file until you change it.
+
 **Sharing a file.** The renderer accepts *any* initials-style tag, so
 `<!-- AB: ... -->` and `<!-- AB-FIX: ... -->` show up as cards alongside yours,
 and the kind suffix colors them the same way regardless of whose initials they
@@ -433,7 +439,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 218-check self-test inside the Electron bundle
+npm run selftest       # run the 224-check self-test inside the Electron bundle
 npm run test:links     # test desktop links with temporary documents
 npm run test:session   # kill the app and check that its tabs come back
 npm run dist           # build both .dmg files into electron/dist/
