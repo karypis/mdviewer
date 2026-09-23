@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 TMP="$(mktemp -d)"
 cp "$ROOT/mdviewer.html" "$TMP/mdviewer.html"
-"$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=5000 \
+"$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=20000 \
   --dump-dom "file://$TMP/mdviewer.html?selftest=1" > "$TMP/dom.html" 2>/dev/null
 node -e '
 const fs=require("fs");

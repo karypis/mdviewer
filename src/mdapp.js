@@ -116,6 +116,10 @@
   // Open a handle in a tab: focus it if already open, else append a new tab,
   // make it active, and load the file into it.
   async function openInTab(handle) {
+    if (window.electronAPI && window.electronAPI.getFilePath && !handle._electronPath) {
+      var file = await handle.getFile();
+      if (file instanceof File) handle._electronPath = window.electronAPI.getFilePath(file) || null;
+    }
     var key = docKey(handle);
     if (key != null) {
       for (var i = 0; i < app.tabs.length; i++) {
@@ -124,9 +128,21 @@
     }
     var doc = newDoc();
     doc.fileHandle = handle;
+    var prev = app.active;
     app.tabs.push(doc);
     activateTab(app.tabs.length - 1, true); // repoint state; loadHandle renders
-    await loadHandle(handle);
+    try {
+      await loadHandle(handle);
+    } catch (e) {
+      // The file could not be read: drop the half-made tab and go back to the
+      // tab that was active, so a failed open leaves no empty tab behind.
+      app.tabs.pop();
+      app.active = -1;
+      if (prev >= 0 && prev < app.tabs.length) activateTab(prev);
+      else { state = newDoc(); paintSaveState('saved'); renderAll(); }
+      renderTabs();
+      throw e;
+    }
     renderTabs();
   }
 
@@ -176,7 +192,8 @@
     activateTab((app.active + dir + app.tabs.length) % app.tabs.length);
   }
 
-  // Rebuild the tab strip. Hidden when nothing is open.
+  // Rebuild the tab strip. Hidden when nothing is open. Every rebuild also
+  // reports the window's tabs to the desktop app for session restore.
   function renderTabs() {
     var bar = $('tabbar');
     if (!bar) return;
@@ -185,6 +202,70 @@
     for (var i = 0; i < app.tabs.length; i++) {
       bar.appendChild(buildTab(app.tabs[i], i));
     }
+    publishSession();
+  }
+
+  // ---- session restore (desktop app) ------------------------------------
+  // The main process keeps a session file with each window's open tabs, so an
+  // app that was killed (crash, force quit) comes back with the same tabs.
+  // Only files with a native path can be restored; browser handles are skipped.
+  function sessionSnapshot() {
+    var tabs = [], active = -1;
+    for (var i = 0; i < app.tabs.length; i++) {
+      var doc = app.tabs[i];
+      var p = doc.fileHandle && doc.fileHandle._electronPath;
+      if (!p) continue;
+      if (i === app.active) active = tabs.length;
+      var top = i === app.active && docwrap ? docwrap.scrollTop : doc.scrollTop;
+      tabs.push({ path: p, scrollTop: Math.max(0, Math.floor(top || 0)) });
+    }
+    return { tabs: tabs, active: active < 0 ? tabs.length - 1 : active };
+  }
+  function publishSession() {
+    if (!window.electronAPI || !window.electronAPI.sessionChanged) return;
+    window.electronAPI.sessionChanged(sessionSnapshot());
+  }
+  var sessionScrollTimer = null;
+  function publishSessionSoon() {
+    clearTimeout(sessionScrollTimer);
+    sessionScrollTimer = setTimeout(publishSession, 500);
+  }
+
+  // Opens arriving from the main process (restore, Finder, argv) run one at a
+  // time: loadHandle writes into the shared `state`, so two overlapping opens
+  // would load one file into the other's tab.
+  var openChain = Promise.resolve();
+  function enqueueOpen(fn) {
+    openChain = openChain.then(fn, fn);
+    return openChain;
+  }
+
+  // Reopen the saved tabs in order, put each back at its saved scroll offset,
+  // and finish on the tab that was active. Files that fail to load are skipped
+  // and counted in one toast.
+  async function restoreSession(s) {
+    if (!s || !Array.isArray(s.tabs)) return;
+    var failed = 0;
+    var activeEntry = s.tabs[s.active];
+    var activePath = activeEntry && activeEntry.path;
+    for (var i = 0; i < s.tabs.length; i++) {
+      var t = s.tabs[i];
+      if (!t || typeof t.path !== 'string') continue;
+      try { await openInTab(electronFileHandle(t.path)); }
+      catch (e) { failed++; continue; }
+      var top = t.scrollTop > 0 ? t.scrollTop : 0;
+      if (state.fileHandle && state.fileHandle._electronPath === t.path && docwrap) {
+        state.scrollTop = top;
+        docwrap.scrollTop = top;
+        marginEl.scrollTop = top;
+      }
+    }
+    if (activePath) {
+      for (var j = 0; j < app.tabs.length; j++) {
+        if (docKey(app.tabs[j].fileHandle) === activePath) { activateTab(j); break; }
+      }
+    }
+    if (failed) toast(failed + (failed === 1 ? ' file from the last session' : ' files from the last session') + ' could not be reopened');
   }
   function buildTab(doc, i) {
     var tab = document.createElement('div');
@@ -654,6 +735,15 @@
       try { window.hljs.highlightElement(codes[c]); } catch (e) {}
     }
     materializeMarkers(docEl);
+    var usedIds = new Set(Array.from(docEl.querySelectorAll('[id]'), function (el) { return el.id; }));
+    docEl.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function (heading) {
+      if (heading.id) return;
+      var slug = heading.textContent.trim().toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\s-]/gu, '').replace(/\s/g, '-');
+      var id = slug, suffix = 0;
+      while (usedIds.has(id)) id = slug + '-' + (++suffix);
+      heading.id = id;
+      usedIds.add(id);
+    });
   }
 
   // Render one block to sanitized HTML, replacing each GK comment with an
@@ -1270,12 +1360,42 @@
   }
 
   // ---- global events ----------------------------------------------------
+  function scrollToFragment(hash) {
+    var id;
+    try { id = decodeURIComponent(hash.slice(1)); }
+    catch (_) { toast('Invalid section link'); return; }
+    if (!id) { docwrap.scrollTop = 0; marginEl.scrollTop = 0; return; }
+    var target = Array.from(docEl.querySelectorAll('[id],a[name]')).find(function (el) {
+      return el.id === id || el.getAttribute('name') === id;
+    });
+    if (!target) { toast('Section not found: ' + id); return; }
+    var block = target.closest('.block');
+    if (block) scrollToBlock(parseInt(block.dataset.idx, 10));
+  }
+
+  async function followDocumentLink(a) {
+    var href = a.getAttribute('href');
+    if (!href) return;
+    if (href.charAt(0) === '#') { scrollToFragment(href); return; }
+    if (!window.electronAPI || !window.electronAPI.openLink) {
+      window.open(a.href, '_blank', 'noopener');
+      return;
+    }
+    try {
+      var target = await window.electronAPI.openLink(href, state.fileHandle && state.fileHandle._electronPath);
+      if (target.kind === 'markdown') {
+        await openInTab(electronFileHandle(target.path));
+        if (target.hash) scrollToFragment(target.hash);
+      } else if (target.kind === 'anchor') scrollToFragment(target.hash);
+    } catch (e) { toast('Open link failed: ' + e.message); }
+  }
+
   function onDocClick(e) {
-    if (state.editing != null) return;
     if (e.target.closest('.gkmark')) return;
-    var a = e.target.closest('a');
-    if (a && (e.metaKey || e.ctrlKey)) { window.open(a.href, '_blank'); return; }
+    var a = e.target.closest('a[href]');
     if (a) e.preventDefault();
+    if (a && (e.metaKey || e.ctrlKey)) { followDocumentLink(a); return; }
+    if (state.editing != null) return;
     var sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // selection -> comment flow
     var blockEl = e.target.closest('.block');
@@ -1499,7 +1619,7 @@
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitComposer(); }
       if (e.key === 'Escape') { e.preventDefault(); closeComposer(); }
     });
-    docwrap.addEventListener('scroll', function () { marginEl.scrollTop = docwrap.scrollTop; });
+    docwrap.addEventListener('scroll', function () { marginEl.scrollTop = docwrap.scrollTop; publishSessionSoon(); });
     window.addEventListener('resize', function () { if (state.source) renderComments(); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !$('modalBackdrop').classList.contains('hidden')) { closeModal(); return; }
@@ -1546,6 +1666,8 @@
         app: app, openInTab: openInTab, closeTab: closeTab, activateTab: activateTab,
         closeActiveTab: closeActiveTab, stepTab: stepTab, renderTabs: renderTabs,
         moveTabToNewWindow: moveTabToNewWindow, newDoc: newDoc,
+        sessionSnapshot: sessionSnapshot, restoreSession: restoreSession,
+        openElectronPath: openElectronPath,
         scrollToBlock: scrollToBlock, docwrap: function () { return docwrap; },
       };
       // `state` is reassigned on every tab switch, so expose it as a live getter
@@ -1557,7 +1679,10 @@
     // Electron: open files handed in by Finder / the app menu, routing I/O
     // through the native fs bridge exposed by preload.js.
     if (window.electronAPI) {
-      window.electronAPI.onOpenPath(function (p) { openElectronPath(p); });
+      window.electronAPI.onOpenPath(function (p) { enqueueOpen(function () { return openElectronPath(p); }); });
+      if (window.electronAPI.onRestoreSession) {
+        window.electronAPI.onRestoreSession(function (s) { enqueueOpen(function () { return restoreSession(s); }); });
+      }
       if (window.electronAPI.onMenuAction) {
         window.electronAPI.onMenuAction(function (a) {
           if (a === 'open-file') openFile();
@@ -2290,6 +2415,305 @@
         while (app.tabs.length) app.tabs.pop();
         app.active = -1; state = newDoc();
       }
+
+      // =====================================================================
+      // Real input events and native bridges. The sections above call the
+      // functions behind the UI directly; these dispatch the events and stub
+      // the browser / Electron APIs so the handlers themselves run.
+      // =====================================================================
+      var tick = function (ms) { return new Promise(function (r) { setTimeout(r, ms || 10); }); };
+      var fh2 = function (name, text) {
+        var store = { text: text };
+        return {
+          name: name, kind: 'file', _electronPath: '/y/' + name, _store: store,
+          getFile: function () { return Promise.resolve({ name: name, text: function () { return Promise.resolve(store.text); } }); },
+          createWritable: function () {
+            return Promise.resolve({ write: function (d) { store.text = d; return Promise.resolve(); }, close: function () { return Promise.resolve(); } });
+          },
+        };
+      };
+      var closeAllTabs = async function () { while (app.tabs.length) await closeTab(0); };
+      var evKey = function (target, key, mods) {
+        var ev = new KeyboardEvent('keydown', Object.assign({ key: key, bubbles: true, cancelable: true }, mods || {}));
+        target.dispatchEvent(ev);
+        return ev;
+      };
+      var evMouse = function (target, type, init) {
+        var ev = new MouseEvent(type, Object.assign({ bubbles: true, cancelable: true }, init || {}));
+        target.dispatchEvent(ev);
+        return ev;
+      };
+
+      // --- onDocClick + onEditKey: click into a block, Tab, Escape, Cmd+Enter --
+      await closeAllTabs();
+      setSource('# T\n\nOne two three.\n\nSee [the link](http://example.com/x) here.\n\nA <!-- GK: note --> b.\n');
+      window.getSelection().removeAllRanges();
+      var paraEl = docEl.querySelectorAll('.block')[1];
+      var paraIdx = parseInt(paraEl.dataset.idx, 10);
+      evMouse(paraEl.querySelector('p'), 'click');
+      var ta1 = docEl.querySelector('.block[data-idx="' + paraIdx + '"] textarea');
+      check('a real click on a block opens its editor', state.editing === paraIdx && !!ta1);
+      ta1.focus();
+      ta1.selectionStart = ta1.selectionEnd = 3;
+      var tabEv = evKey(ta1, 'Tab');
+      check('Tab in the editor inserts two spaces and is swallowed',
+        tabEv.defaultPrevented && ta1.value === 'One two three.'.slice(0, 3) + '  ' + 'One two three.'.slice(3) && ta1.selectionStart === 5);
+      evKey(ta1, 'Escape');
+      check('Escape abandons the edit without writing',
+        state.editing == null && !docEl.querySelector('textarea') && state.source.indexOf('One  two') === -1);
+      evMouse(docEl.querySelectorAll('.block')[1].querySelector('p'), 'click');
+      var ta2 = docEl.querySelector('textarea');
+      ta2.focus();
+      ta2.value = 'One two three edited.';
+      evKey(ta2, 'Enter', { metaKey: true });
+      check('Cmd+Enter commits the edit', state.editing == null && state.source.indexOf('One two three edited.') !== -1);
+      var linkEl = docEl.querySelector('a');
+      var linkIdx = parseInt(linkEl.closest('.block').dataset.idx, 10);
+      var linkEv = evMouse(linkEl, 'click');
+      check('plain click on a link does not navigate and edits its block',
+        linkEv.defaultPrevented && state.editing === linkIdx);
+      evKey(docEl.querySelector('textarea'), 'Escape');
+      if (!window.electronAPI) {
+        linkEl = docEl.querySelector('a');
+        var opened = [], origOpen = window.open;
+        window.open = function (href) { opened.push(href); return null; };
+        var cmdLinkEv = evMouse(linkEl, 'click', { metaKey: true });
+        var ctrlLinkEv = evMouse(linkEl, 'click', { ctrlKey: true });
+        window.open = origOpen;
+        check('Cmd/Ctrl+click opens each browser link once and cancels native navigation',
+          opened.length === 2 && opened.every(function (href) { return href === 'http://example.com/x'; }) &&
+          cmdLinkEv.defaultPrevented && ctrlLinkEv.defaultPrevented && state.editing == null);
+      } else {
+        skip('desktop link navigation (covered by npm run test:links)');
+      }
+      evMouse(docEl.querySelector('.gkmark'), 'click');
+      check('click on a comment marker opens no editor', state.editing == null);
+
+      // --- onDocMouseUp: releasing a selection shows the comment button ------
+      var tnode = null, tw = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null), tn2;
+      while ((tn2 = tw.nextNode())) { if (tn2.nodeValue.indexOf('two three') !== -1) { tnode = tn2; break; } }
+      var selR = document.createRange();
+      selR.setStart(tnode, tnode.nodeValue.indexOf('two')); selR.setEnd(tnode, tnode.nodeValue.indexOf('three') + 5);
+      window.getSelection().removeAllRanges(); window.getSelection().addRange(selR);
+      evMouse(docEl, 'mouseup');
+      await tick();
+      check('mouseup with a selection shows the comment button',
+        commentBtn.classList.contains('open') && state.pendingSel && state.pendingSel.text === 'two three');
+      window.getSelection().removeAllRanges();
+      evMouse(docEl, 'mouseup');
+      await tick();
+      check('mouseup without a selection hides the comment button', !commentBtn.classList.contains('open') && !state.pendingSel);
+
+      // --- stepTab (Ctrl+Tab) and the tab context menu ------------------------
+      await openInTab(fh2('a.md', '# A\n'));
+      await openInTab(fh2('b.md', '# B\n'));
+      await openInTab(fh2('c.md', '# C\n'));
+      check('three tabs open, last active', app.tabs.length === 3 && app.active === 2);
+      evKey(document, 'Tab', { ctrlKey: true });
+      check('Ctrl+Tab wraps to the first tab', app.active === 0 && state.fileName === 'a.md');
+      evKey(document, 'Tab', { ctrlKey: true, shiftKey: true });
+      check('Ctrl+Shift+Tab steps back (wrapping)', app.active === 2 && state.fileName === 'c.md');
+      var tabB = $('tabbar').querySelectorAll('.tab')[1];
+      evMouse(tabB, 'contextmenu', { clientX: 40, clientY: 40 });
+      var menu = $('tabMenu');
+      check('right-click on a tab opens a 3-item menu', !!menu && menu.querySelectorAll('.ctx-item').length === 3);
+      await tick();
+      evMouse(document, 'mousedown');
+      check('mousedown elsewhere hides the tab menu', !$('tabMenu'));
+      evMouse(tabB, 'contextmenu', { clientX: 40, clientY: 40 });
+      var items = Array.prototype.slice.call($('tabMenu').querySelectorAll('.ctx-item'));
+      var closeOthers = items.filter(function (it) { return it.textContent === 'Close Others'; })[0];
+      evMouse(closeOthers, 'click');
+      await tick(30);
+      check('"Close Others" keeps only the right-clicked tab',
+        app.tabs.length === 1 && app.tabs[0].fileName === 'b.md' && app.active === 0 && state.fileName === 'b.md');
+      await closeAllTabs();
+
+      // --- onClearComments: confirm() gates the clear ------------------------
+      setSource('a <!-- GK: x --> b <!-- GK-Q: y --> c\n');
+      var origConfirm = window.confirm, asked = null;
+      window.confirm = function (msg) { asked = msg; return false; };
+      onClearComments();
+      check('declining the confirm keeps the comments', state.comments.length === 2 && /2 comment/.test(asked));
+      window.confirm = function () { return true; };
+      onClearComments();
+      check('accepting the confirm clears them', state.comments.length === 0 && state.source.indexOf('<!--') === -1);
+      window.confirm = origConfirm;
+
+      // --- exportPDF: browser print, or the Electron bridge -----------------
+      if (!window.electronAPI) {
+        var printed = 0, origPrint = window.print;
+        window.print = function () { printed++; };
+        setSource('');
+        exportPDF();
+        check('export with no document does nothing', printed === 0);
+        setSource('# x\n');
+        exportPDF();
+        window.print = origPrint;
+        check('browser export opens the print dialog', printed === 1);
+        var pdfName = null;
+        window.electronAPI = { exportPDF: function (n) { pdfName = n; return Promise.resolve({ filePath: '/out/' + n }); } };
+        state.fileName = 'notes.md';
+        exportPDF();
+        await tick();
+        check('Electron export derives the .pdf name from the file', pdfName === 'notes.pdf');
+        check('Electron export reports the written path', toastEl.textContent === 'Exported PDF: /out/notes.pdf');
+        window.electronAPI = { exportPDF: function () { return Promise.resolve({ error: 'disk full' }); } };
+        exportPDF();
+        await tick();
+        check('Electron export surfaces the error', toastEl.textContent === 'PDF export failed: disk full');
+        delete window.electronAPI;
+        state.fileName = null;
+      } else {
+        skip('exportPDF (would open a real save dialog; covered by the headless run)');
+      }
+
+      // --- applyLayout / loadLayout ----------------------------------------
+      var rootCS = getComputedStyle(document.documentElement);
+      var origSb = parseInt(rootCS.getPropertyValue('--sidebar-w'), 10);
+      var origMg = parseInt(rootCS.getPropertyValue('--margin-w'), 10);
+      applyLayout({ sidebar: 201, margin: 321 });
+      check('applyLayout sets both panel widths',
+        rootCS.getPropertyValue('--sidebar-w').trim() === '201px' && rootCS.getPropertyValue('--margin-w').trim() === '321px');
+      applyLayout({ margin: 333 });
+      check('applyLayout leaves an omitted width alone', rootCS.getPropertyValue('--sidebar-w').trim() === '201px' && rootCS.getPropertyValue('--margin-w').trim() === '333px');
+      var origLayoutRaw = localStorage.getItem('mdviewer.layout');
+      localStorage.setItem('mdviewer.layout', JSON.stringify({ sidebar: 211, margin: 331 }));
+      loadLayout();
+      check('loadLayout applies the persisted widths', rootCS.getPropertyValue('--sidebar-w').trim() === '211px');
+      if (origLayoutRaw == null) localStorage.removeItem('mdviewer.layout'); else localStorage.setItem('mdviewer.layout', origLayoutRaw);
+      applyLayout({ sidebar: origSb, margin: origMg });
+
+      // --- runPicker / openFile / openFolder with stubbed pickers ------------
+      var hadOFP = 'showOpenFilePicker' in window, origOFP = window.showOpenFilePicker;
+      var hadDP = 'showDirectoryPicker' in window, origDP = window.showDirectoryPicker;
+      var savedStart2 = app.startDir, savedDir2 = app.dirHandle;
+      var pickCalls = [];
+      window.showOpenFilePicker = function (opts) { pickCalls.push(opts); return Promise.resolve([fh2('picked.md', '# Picked\n')]); };
+      await openFile();
+      check('openFile opens the picked file in a tab', state.fileName === 'picked.md' && state.source === '# Picked\n');
+      check('openFile asks for Markdown types', pickCalls[0].types && pickCalls[0].types[0].accept['text/markdown'][0] === '.md');
+      var abortErr = new Error('cancelled'); abortErr.name = 'AbortError';
+      window.showOpenFilePicker = function () { return Promise.reject(abortErr); };
+      toastEl.textContent = '';
+      await openFile();
+      check('cancelling the picker is silent', toastEl.textContent === '' && app.tabs.length === 1);
+      pickCalls = [];
+      var nCall = 0;
+      window.showOpenFilePicker = function (opts) {
+        pickCalls.push(opts.startIn);
+        if (nCall++ === 0) return Promise.reject(new TypeError('stale handle'));
+        return Promise.resolve([fh2('retry.md', '# Retry\n')]);
+      };
+      app.startDir = { name: 'stale-dir' };
+      await openFile();
+      check('a stale start folder retries the picker from Documents',
+        pickCalls.length === 2 && pickCalls[0].name === 'stale-dir' && pickCalls[1] === 'documents' && state.fileName === 'retry.md');
+      window.showOpenFilePicker = function () { return Promise.reject(new Error('boom')); };
+      await openFile();
+      check('a picker failure is reported', toastEl.textContent === 'Open failed: boom');
+      var subDir = { kind: 'directory', name: 'sub', values: function () { return (async function* () {})(); } };
+      var fakeDir = {
+        kind: 'directory', name: 'proj',
+        values: function () {
+          var list = [fh2('z.md', '# Z\n'), subDir, { kind: 'file', name: 'image.png' }];
+          return (async function* () { for (var k = 0; k < list.length; k++) yield list[k]; })();
+        },
+      };
+      window.showDirectoryPicker = function () { return Promise.resolve(fakeDir); };
+      await openFolder();
+      var treeNames = Array.prototype.map.call(sidebar.querySelectorAll('.tree-item'), function (el) { return el.textContent.replace(/^[▸▾]/, ''); });
+      check('openFolder renders the folder tree (dirs first, non-Markdown skipped)',
+        app.dirHandle === fakeDir && sidebar.querySelector('.sb-title').textContent === 'proj/' && treeNames.join(',') === 'sub,z.md');
+      window.showDirectoryPicker = function () { return Promise.reject(abortErr); };
+      await openFolder();
+      check('cancelling the folder picker keeps the current folder', app.dirHandle === fakeDir);
+      if (hadOFP) window.showOpenFilePicker = origOFP; else delete window.showOpenFilePicker;
+      if (hadDP) window.showDirectoryPicker = origDP; else delete window.showDirectoryPicker;
+      app.startDir = savedStart2; app.dirHandle = savedDir2;
+      await closeAllTabs();
+
+      // --- Electron file bridge: openElectronPath / electronFileHandle / basename
+      check('basename handles both separators',
+        basename('/tmp/dir/note.md') === 'note.md' && basename('C:\\a\\b.md') === 'b.md' && basename('plain.md') === 'plain.md');
+      if (!window.electronAPI) {
+        var files = { '/tmp/dir/note.md': '# From Electron\n\nbody text\n' }, writes = {};
+        window.electronAPI = {
+          readFile: function (p) { return files[p] != null ? Promise.resolve(files[p]) : Promise.reject(new Error('ENOENT')); },
+          writeFile: function (p, d) { writes[p] = d; return Promise.resolve(); },
+        };
+        await openElectronPath('/tmp/dir/note.md');
+        check('openElectronPath reads through the bridge into a tab',
+          state.fileName === 'note.md' && state.source === files['/tmp/dir/note.md'] && state.fileHandle._electronPath === '/tmp/dir/note.md');
+        state.source = state.source + 'more\n';
+        await writeDoc(state);
+        check('saving an Electron-opened file writes through the bridge', writes['/tmp/dir/note.md'] === files['/tmp/dir/note.md'] + 'more\n');
+        await openElectronPath('/tmp/dir/missing.md');
+        check('a bridge read failure is reported and leaves no dead tab',
+          toastEl.textContent === 'Open failed: ENOENT' && app.tabs.length === 1 && state.fileName === 'note.md');
+
+        files['/tmp/dir/linked.md'] = '# Linked report\n\n## Details\n\nTarget text.\n';
+        var linkCalls = [];
+        window.electronAPI.openLink = function (href, base) {
+          linkCalls.push({ href: href, base: base });
+          return Promise.resolve({ kind: 'markdown', path: '/tmp/dir/linked.md', hash: '#details' });
+        };
+        setSource('# Source\n\n[Report](linked.md#details)\n');
+        var nativeLinkEvent = evMouse(docEl.querySelector('a'), 'click', { metaKey: true });
+        await tick();
+        check('desktop link passes the authored relative URL and source path to the bridge',
+          linkCalls.length === 1 && linkCalls[0].href === 'linked.md#details' && linkCalls[0].base === '/tmp/dir/note.md');
+        check('desktop link cancels native navigation and renders the linked document in a tab',
+          nativeLinkEvent.defaultPrevented && app.tabs.length === 2 && state.fileName === 'linked.md' &&
+          docEl.querySelector('h1').textContent === 'Linked report' && !!docEl.querySelector('#details'));
+        activateTab(0);
+        evMouse(docEl.querySelector('a'), 'click', { ctrlKey: true });
+        await tick();
+        check('reopening a linked Markdown file reuses its tab', app.tabs.length === 2 && app.active === 1);
+        activateTab(0);
+        window.electronAPI.openLink = function () { return Promise.reject(new Error('link failure')); };
+        evMouse(docEl.querySelector('a'), 'click', { metaKey: true });
+        await tick();
+        check('a link error preserves the displayed document and reports the failure',
+          app.active === 0 && app.tabs.length === 2 && toastEl.textContent === 'Open link failed: link failure');
+        // --- session restore: restoreSession / sessionSnapshot ---------------
+        var longDoc = '# Long\n\n';
+        for (var li = 0; li < 60; li++) longDoc += 'Paragraph ' + li + ' of the long document.\n\n';
+        files['/tmp/dir/long.md'] = longDoc;
+        files['/tmp/dir/short.md'] = '# Short\n';
+        var published = [];
+        window.electronAPI.sessionChanged = function (s) { published.push(s); };
+        await restoreSession({ tabs: [
+          { path: '/tmp/dir/long.md', scrollTop: 120 }, { path: '/tmp/dir/gone.md', scrollTop: 0 },
+          { path: '/tmp/dir/short.md', scrollTop: 0 }], active: 0 });
+        check('restoreSession reopens the saved files that still exist and activates the saved tab',
+          app.tabs.length === 4 && state.fileName === 'long.md' && app.active === 2 &&
+          toastEl.textContent === '1 file from the last session could not be reopened');
+        check('restoreSession puts the active tab back at its saved scroll offset', docwrap.scrollTop === 120);
+        var snap = sessionSnapshot();
+        check('sessionSnapshot lists every native path with the active index and scroll offset',
+          snap.tabs.map(function (t) { return t.path; }).join(',') === '/tmp/dir/note.md,/tmp/dir/linked.md,/tmp/dir/long.md,/tmp/dir/short.md' &&
+          snap.active === 2 && snap.tabs[2].scrollTop === 120);
+        published.length = 0;
+        await closeTab(3);
+        var lastPublished = published[published.length - 1];
+        check('closing a tab publishes the new tab set to the bridge',
+          !!lastPublished && lastPublished.tabs.length === 3 && lastPublished.active === 2);
+        delete window.electronAPI.sessionChanged;
+        // These synthetic edits must not schedule writes after the bridge is removed.
+        app.tabs.forEach(function (doc) { doc.diskSource = doc.source; });
+        delete window.electronAPI;
+        await closeAllTabs();
+      } else {
+        skip('Electron file bridge (contextBridge cannot be stubbed; covered by the headless run)');
+      }
+
+      // --- idbPut / idbGet -------------------------------------------------
+      await idbPut('selftest', 'k', { a: 1, b: 'two' });
+      var gotIdb = await idbGet('selftest', 'k');
+      check('idbPut/idbGet round-trip an object', !!gotIdb && gotIdb.a === 1 && gotIdb.b === 'two');
+      check('idbGet of a missing key is null', (await idbGet('selftest', 'absent')) === null);
+      await idbPut('selftest', 'k', null);
     } catch (e) {
       results.push('FAIL exception: ' + (e && e.stack ? e.stack : e));
     } finally {

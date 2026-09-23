@@ -73,6 +73,15 @@ Close a tab with its **×**, a middle-click, or **⌘W**. Closing flushes any
 unsaved bytes to disk first, so nothing is lost. Closing the last tab returns to
 the empty state.
 
+**Session restore.** The desktop app records the open tabs of every window in
+`session.json` inside its user-data folder, after each tab change and scroll.
+The next launch reopens those windows and tabs, at the same scroll offsets and
+with the same active tab, whether the app quit normally, crashed, or was killed
+with Force Quit or `kill -9`. Files deleted in the meantime are skipped and one
+message reports how many. Closing a window with its close button forgets that
+window's tabs; quitting the app keeps them. A file opened from Finder at launch
+appears as one more tab in the first restored window.
+
 **Separate windows.** Right-click a tab and choose **Move to New Window** (or
 **File → Move Tab to New Window**, **⌘⇧N**) to pull that file into its own OS
 window, so you can read two files side by side. **File → New Window** (**⌘N**)
@@ -109,7 +118,22 @@ indented by level. Click a heading to scroll to it.
 
 Links behave differently from a normal page, because a plain click is how you
 enter the editor. **Click** a link to edit the block that contains it.
-**⌘-click** (Ctrl-click on Windows and Linux) to open the link in a new tab.
+**⌘-click** (Ctrl-click on Windows and Linux) to follow the link.
+
+In the desktop app, local `.md`, `.markdown`, and `.txt` links open in mdviewer
+tabs. An already-open file reuses its tab. Relative paths resolve from the folder
+containing the displayed Markdown file. Web links open in the default browser;
+other local files open in their default application. A missing file shows an
+error and keeps the current document open.
+
+Section links such as `#results` scroll to the matching heading. A link such as
+`reports/summary.md#results` opens the file, then scrolls to that section. Heading
+IDs use lowercase text with punctuation removed and spaces replaced by hyphens.
+Repeated headings receive `-1`, `-2`, and subsequent suffixes.
+
+In the browser version, section links scroll within the document. Other links
+open in a browser tab. Relative file links still resolve from `mdviewer.html`;
+use the desktop app to follow links between local Markdown files.
 
 ## 4. Finding text
 
@@ -307,7 +331,7 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 | **Tab** | Block editor | Insert two spaces |
 | **⌘↵** | Comment composer | Save the comment |
 | **Esc** | Comment composer | Cancel the comment |
-| **⌘-click** | On a link | Open the link in a new tab |
+| **⌘-click** | On a link | Follow the link (see Reading) |
 | **⌘O** / **⇧⌘O** | Desktop app | Open File / Open Folder |
 | **⌘P** | Desktop app | Export as PDF |
 
@@ -408,7 +432,9 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 165-check self-test inside the Electron bundle
+npm run selftest       # run the 203-check self-test inside the Electron bundle
+npm run test:links     # test desktop links with temporary documents
+npm run test:session   # kill the app and check that its tabs come back
 npm run dist           # build both .dmg files into electron/dist/
 ```
 
@@ -453,8 +479,8 @@ icon-concepts/       <- app icon: concepts, the chosen master, and the build scr
 
 ```
 node tools/build.js          # rebuild mdviewer.html after editing src/ or vendor/
-node --test tests/*.test.js  # 77 unit + integration tests (pure logic + shipped file)
-bash tools/selftest.sh       # 165 in-browser checks (render, edit, comment, find, wrap, reload, tabs, theme)
+node --test tests/*.test.js  # unit + integration tests (pure logic + shipped file)
+bash tools/selftest.sh       # in-browser checks (render, edit, comment, find, wrap, reload, tabs, links, theme)
 ```
 
 Always rebuild after changing anything in `src/` or `vendor/`. An integration test

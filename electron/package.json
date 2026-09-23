@@ -8,6 +8,8 @@
     "sync": "node ../tools/build.js && cp ../mdviewer.html ./mdviewer.html",
     "start": "npm run sync && electron .",
     "selftest": "npm run sync && MDVIEWER_SELFTEST=1 electron .",
+    "test:links": "npm run sync && electron ../tools/electron-linktest.js",
+    "test:session": "npm run sync && node ../tools/electron-sessiontest.js",
     "dist": "npm run sync && electron-builder --config.directories.output=\"${MDVIEWER_OUT:-dist}\""
   },
   "devDependencies": {
@@ -21,6 +23,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "links.js",
+      "session.js",
       "mdviewer.html",
       "node_modules/**/*"
     ],
