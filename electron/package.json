@@ -10,7 +10,8 @@
     "selftest": "npm run sync && MDVIEWER_SELFTEST=1 electron .",
     "test:links": "npm run sync && electron ../tools/electron-linktest.js",
     "test:session": "npm run sync && node ../tools/electron-sessiontest.js",
-    "dist": "npm run sync && electron-builder --config.directories.output=\"${MDVIEWER_OUT:-dist}\""
+    "dist": "npm run sync && electron-builder -c.extraMetadata.version=$(node ../tools/version.js) -c.buildVersion=$(node ../tools/version.js --build) --config.directories.output=\"${MDVIEWER_OUT:-dist}\"",
+    "version": "node ../tools/version.js --label"
   },
   "devDependencies": {
     "electron": "^31.0.0",

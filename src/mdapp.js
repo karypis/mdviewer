@@ -1567,6 +1567,10 @@
     sidebar = $('sidebar'); composer = $('composer'); commentBtn = $('commentBtn');
     toastEl = $('toast');
 
+    // version stamped into the page by tools/build.js (git-derived)
+    var vmeta = document.querySelector('meta[name="mdviewer-version"]');
+    $('appVersion').textContent = vmeta ? vmeta.content : 'unknown';
+
     loadSettings();
     applyAppearance();
     populateVariants();
@@ -2707,6 +2711,10 @@
       } else {
         skip('Electron file bridge (contextBridge cannot be stubbed; covered by the headless run)');
       }
+
+      // --- version stamp: git-derived, shown in Settings ---------------------
+      check('settings show a git-derived version "major.minor.patch (hash)"',
+        /^\d+\.\d+\.\d+ \([0-9a-f]{7,}(-dirty)?\)$/.test($('appVersion').textContent));
 
       // --- idbPut / idbGet -------------------------------------------------
       await idbPut('selftest', 'k', { a: 1, b: 'two' });

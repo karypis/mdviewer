@@ -451,6 +451,48 @@ MDVIEWER_OUT=/tmp/mdv-build npm run dist
 Shipping to others without the unidentified-developer prompt would require an
 Apple Developer ID certificate and notarization, which this project does not use.
 
+### Version numbers
+
+The version is derived from git at build time by `tools/version.js`, so every
+build names the commit it came from. The nearest `v<major>.<minor>.<patch>` tag
+supplies the first two numbers. The tag's patch number plus the number of
+commits since the tag is the third. The short commit hash is the build number,
+with `-dirty` appended when the tree had uncommitted changes:
+
+```
+node tools/version.js            # 1.0.9
+node tools/version.js --build    # 56a2db3
+node tools/version.js --label    # 1.0.9 (56a2db3)
+```
+
+The label is stamped into `mdviewer.html` as a `<meta name="mdviewer-version">`
+tag and shown at the bottom of **Settings**. The copy of `mdviewer.html` checked
+into the repository is built before its commit exists, so its stamp names the
+previous commit with `-dirty`; run `node tools/build.js` for an exact stamp.
+`npm run dist` writes the version
+into the bundle's `CFBundleShortVersionString` and the build into
+`CFBundleVersion`, so **About mdviewer** shows both. To start a new series, tag
+a commit: `git tag v1.1.0`.
+
+### Repack without electron-builder
+
+When `electron/node_modules` cannot be read (a cloud-only Google Drive folder),
+`npm run dist` cannot run. `tools/repack.sh` rebuilds the app from an existing
+bundle instead: it extracts the installed `app.asar`, copies in the current
+`electron/*.js` and a fresh `mdviewer.html`, writes the version fields, packs,
+and ad-hoc signs. Only the JavaScript and HTML change; the Electron binary is
+reused.
+
+```
+bash tools/repack.sh              # build into /tmp/mdviewer-repack/mdviewer.app
+bash tools/repack.sh --install    # ...and replace /Applications/mdviewer.app
+```
+
+`--install` quits the running app, zips the previous bundle into
+`~/mdviewer-backups/`, and re-registers the new one with Launch Services. The
+backup is zipped because Launch Services registers any bare `.app` it finds as
+a second copy of the app.
+
 ## Project layout
 
 The shipped artifact is the single self-contained `mdviewer.html`. It is assembled

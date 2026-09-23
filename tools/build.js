@@ -10,8 +10,11 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const r = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+const { describeVersion } = require('./version.js');
 
 const parts = {
+  // "1.0.9 (56a2db3)": derived from git so the page names its commit
+  version: describeVersion().label,
   'hljs-css': r('vendor/highlight-github-dark.css'),
   'app-css': r('src/app.css'),
   marked: r('vendor/marked.min.js'),

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mdviewer</title>
+<meta name="mdviewer-version" content="1.0.9 (56a2db3-dirty)">
 <style>pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}/*!
   Theme: GitHub Dark
   Description: Dark theme as seen on github.com
@@ -636,6 +637,8 @@ body {
       a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
       off. Edited paragraphs are re-wrapped to this width on save; the on-screen
       view always reflows to the window.</p>
+
+    <p class="hint" id="versionLine">mdviewer <span id="appVersion"></span></p>
 
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>
@@ -4051,6 +4054,10 @@ return He}()
     sidebar = $('sidebar'); composer = $('composer'); commentBtn = $('commentBtn');
     toastEl = $('toast');
 
+    // version stamped into the page by tools/build.js (git-derived)
+    var vmeta = document.querySelector('meta[name="mdviewer-version"]');
+    $('appVersion').textContent = vmeta ? vmeta.content : 'unknown';
+
     loadSettings();
     applyAppearance();
     populateVariants();
@@ -5191,6 +5198,10 @@ return He}()
       } else {
         skip('Electron file bridge (contextBridge cannot be stubbed; covered by the headless run)');
       }
+
+      // --- version stamp: git-derived, shown in Settings ---------------------
+      check('settings show a git-derived version "major.minor.patch (hash)"',
+        /^\d+\.\d+\.\d+ \([0-9a-f]{7,}(-dirty)?\)$/.test($('appVersion').textContent));
 
       // --- idbPut / idbGet -------------------------------------------------
       await idbPut('selftest', 'k', { a: 1, b: 'two' });

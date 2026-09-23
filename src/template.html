@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mdviewer</title>
+<meta name="mdviewer-version" content="/*BUILD:version*/">
 <style>/*BUILD:hljs-css*/</style>
 <style>/*BUILD:app-css*/</style>
 </head>
@@ -110,6 +111,8 @@
       a number (e.g. <code>80</code>) forces it; <code>0</code> turns wrapping
       off. Edited paragraphs are re-wrapped to this width on save; the on-screen
       view always reflows to the window.</p>
+
+    <p class="hint" id="versionLine">mdviewer <span id="appVersion"></span></p>
 
     <div class="row">
       <button class="cancel" id="setCancel">Cancel</button>

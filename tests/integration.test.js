@@ -20,6 +20,12 @@ test('no unfilled BUILD placeholders remain', () => {
   assert.ok(!/\/\*BUILD:[a-z-]+\*\//.test(HTML), 'all placeholders must be inlined');
 });
 
+test('the page carries a git-derived version stamp', () => {
+  const m = HTML.match(/<meta name="mdviewer-version" content="([^"]+)">/);
+  assert.ok(m, 'missing version meta');
+  assert.match(m[1], /^\d+\.\d+\.\d+ \([0-9a-f]{7,}(-dirty)?\)$/);
+});
+
 test('required UI anchors are present', () => {
   for (const id of ['toolbar', 'sidebar', 'doc', 'margin', 'composer', 'commentBtn', 'saveState']) {
     assert.ok(HTML.includes('id="' + id + '"'), 'missing #' + id);
