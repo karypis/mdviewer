@@ -680,7 +680,7 @@
     if (smooth === false || typeof docwrap.scrollTo !== 'function') {
       docwrap.scrollTop = top;
     } else {
-      docwrap.scrollTo({ top: top, behavior: 'smooth' });
+      docwrap.scrollTo({ top: top, behavior: scrollBehavior() });
     }
     marginEl.scrollTop = top;
     return top;
@@ -690,6 +690,8 @@
   function setSource(text) {
     state.source = text;
     state.expanded = {}; // per-card collapse overrides do not carry across files
+    state.activeComment = null; // nor does the focused comment (ids restart at 0)
+    if (CSS.highlights) CSS.highlights.delete('gk-span-active');
     state.detectedWidth = MDCore.detectWrapWidth(text); // learn the file's wrap column
     relex();
     renderAll();
@@ -785,6 +787,13 @@
         node = rest;
       }
     }
+  }
+
+  // Animated scrolling, unless the OS asks for reduced motion. The headless
+  // selftest forces reduced motion so its scrolls are instant and deterministic.
+  function scrollBehavior() {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return reduce ? 'auto' : 'smooth';
   }
 
   // ---- comments: margin cards + anchored highlights --------------------
@@ -1003,7 +1012,7 @@
       var hl = new Highlight(); hl.add(range); CSS.highlights.set('gk-span-active', hl);
     }
     var marker = docEl.querySelector('.gkmark[data-gk="' + id + '"]');
-    if (marker) marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (marker) marker.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
   }
 
   // ---- comment write path ----------------------------------------------
@@ -1829,6 +1838,15 @@
         check('highlight is the full selected span', rng && rng.toString() === 'computes an initial partition');
         var qset = CSS.highlights.get('gk-span-q');
         check('a GK-Q comment tints its span in the purple registry', qset && qset.size === 1 && qset.has(rng));
+        focusComment(nc.id);
+        var actset = CSS.highlights.get('gk-span-active');
+        check('clicking a card registers its span as the active highlight', actset && actset.size === 1 && actset.has(rng));
+        var actRule = null;
+        Array.prototype.forEach.call(document.styleSheets, function (ss) {
+          try { Array.prototype.forEach.call(ss.cssRules, function (r) { if (r.selectorText === '::highlight(gk-span-active)') actRule = r; }); } catch (e) {}
+        });
+        check('the active span is drawn as an underline, not a background',
+          !!actRule && actRule.style.textDecorationLine === 'underline' && actRule.style.backgroundColor === '');
         // editing the comment body preserves its span field
         editComment(nc);
         composer.querySelector('textarea').value = 'which algorithm, exactly?';

@@ -13,7 +13,6 @@
   --danger: #cc4444;
   --ok: #34a853;
   --warn: #e0a030;
-  --hl-active: rgba(255, 200, 60, 0.85);
   /* GK variant accent colors */
   --gk: #4a9eff;
   --gk-fix: #e0a030;
@@ -354,8 +353,9 @@ body {
 ::highlight(gk-span-fix) { background-color: rgba(224, 160, 48, 0.45); color: inherit; }
 ::highlight(gk-span-q) { background-color: rgba(176, 124, 255, 0.45); color: inherit; }
 ::highlight(gk-span-nit) { background-color: rgba(136, 136, 136, 0.45); color: inherit; }
-/* the focused comment's span gets a bright amber marker with dark text */
-::highlight(gk-span-active) { background-color: var(--hl-active); color: #1a1a1a; }
+/* the focused comment's span keeps its kind tint and gains a thick underline
+   in the text color, so it stands out from every kind on both panel themes */
+::highlight(gk-span-active) { text-decoration: underline 2px solid currentColor; }
 /* find-in-document matches: all matches dim, current match bright */
 ::highlight(search) { background-color: rgba(255, 213, 0, 0.32); color: inherit; }
 ::highlight(search-current) { background-color: #ff9d2e; color: #1a1a1a; }

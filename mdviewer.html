@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mdviewer</title>
-<meta name="mdviewer-version" content="1.0.10 (d350a5d-dirty)">
+<meta name="mdviewer-version" content="1.0.11 (307dfe4-dirty)">
 <style>pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}/*!
   Theme: GitHub Dark
   Description: Dark theme as seen on github.com
@@ -30,7 +30,6 @@
   --danger: #cc4444;
   --ok: #34a853;
   --warn: #e0a030;
-  --hl-active: rgba(255, 200, 60, 0.85);
   /* GK variant accent colors */
   --gk: #4a9eff;
   --gk-fix: #e0a030;
@@ -371,8 +370,9 @@ body {
 ::highlight(gk-span-fix) { background-color: rgba(224, 160, 48, 0.45); color: inherit; }
 ::highlight(gk-span-q) { background-color: rgba(176, 124, 255, 0.45); color: inherit; }
 ::highlight(gk-span-nit) { background-color: rgba(136, 136, 136, 0.45); color: inherit; }
-/* the focused comment's span gets a bright amber marker with dark text */
-::highlight(gk-span-active) { background-color: var(--hl-active); color: #1a1a1a; }
+/* the focused comment's span keeps its kind tint and gains a thick underline
+   in the text color, so it stands out from every kind on both panel themes */
+::highlight(gk-span-active) { text-decoration: underline 2px solid currentColor; }
 /* find-in-document matches: all matches dim, current match bright */
 ::highlight(search) { background-color: rgba(255, 213, 0, 0.32); color: inherit; }
 ::highlight(search-current) { background-color: #ff9d2e; color: #1a1a1a; }
@@ -3172,7 +3172,7 @@ return He}()
     if (smooth === false || typeof docwrap.scrollTo !== 'function') {
       docwrap.scrollTop = top;
     } else {
-      docwrap.scrollTo({ top: top, behavior: 'smooth' });
+      docwrap.scrollTo({ top: top, behavior: scrollBehavior() });
     }
     marginEl.scrollTop = top;
     return top;
@@ -3182,6 +3182,8 @@ return He}()
   function setSource(text) {
     state.source = text;
     state.expanded = {}; // per-card collapse overrides do not carry across files
+    state.activeComment = null; // nor does the focused comment (ids restart at 0)
+    if (CSS.highlights) CSS.highlights.delete('gk-span-active');
     state.detectedWidth = MDCore.detectWrapWidth(text); // learn the file's wrap column
     relex();
     renderAll();
@@ -3277,6 +3279,13 @@ return He}()
         node = rest;
       }
     }
+  }
+
+  // Animated scrolling, unless the OS asks for reduced motion. The headless
+  // selftest forces reduced motion so its scrolls are instant and deterministic.
+  function scrollBehavior() {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return reduce ? 'auto' : 'smooth';
   }
 
   // ---- comments: margin cards + anchored highlights --------------------
@@ -3495,7 +3504,7 @@ return He}()
       var hl = new Highlight(); hl.add(range); CSS.highlights.set('gk-span-active', hl);
     }
     var marker = docEl.querySelector('.gkmark[data-gk="' + id + '"]');
-    if (marker) marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (marker) marker.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
   }
 
   // ---- comment write path ----------------------------------------------
@@ -4321,6 +4330,15 @@ return He}()
         check('highlight is the full selected span', rng && rng.toString() === 'computes an initial partition');
         var qset = CSS.highlights.get('gk-span-q');
         check('a GK-Q comment tints its span in the purple registry', qset && qset.size === 1 && qset.has(rng));
+        focusComment(nc.id);
+        var actset = CSS.highlights.get('gk-span-active');
+        check('clicking a card registers its span as the active highlight', actset && actset.size === 1 && actset.has(rng));
+        var actRule = null;
+        Array.prototype.forEach.call(document.styleSheets, function (ss) {
+          try { Array.prototype.forEach.call(ss.cssRules, function (r) { if (r.selectorText === '::highlight(gk-span-active)') actRule = r; }); } catch (e) {}
+        });
+        check('the active span is drawn as an underline, not a background',
+          !!actRule && actRule.style.textDecorationLine === 'underline' && actRule.style.backgroundColor === '');
         // editing the comment body preserves its span field
         editComment(nc);
         composer.querySelector('textarea').value = 'which algorithm, exactly?';
