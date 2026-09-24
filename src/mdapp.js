@@ -646,6 +646,16 @@
 
   function toggleSidebar() { sidebar.classList.toggle('hidden'); }
 
+  // The comment panel (kind filter + cards) and its resize gutter. Hiding it
+  // leaves the span highlights in the document; adding a comment shows it again.
+  function setMarginShown(shown) {
+    $('marginCol').classList.toggle('hidden', !shown);
+    $('gutterRight').classList.toggle('hidden', !shown);
+    $('toggleMargin').classList.toggle('off', !shown);
+  }
+  function marginShown() { return !$('marginCol').classList.contains('hidden'); }
+  function toggleMargin() { setMarginShown(!marginShown()); }
+
   // ---- outline (single-file mode) --------------------------------------
   function renderSidebarOutline() {
     sidebar.innerHTML = '';
@@ -1346,6 +1356,7 @@
       text = MDCore.serializeComment(tag, body, mode.span);
       at = mode.pos;
       state.source = MDCore.spliceSource(state.source, mode.pos, mode.pos, text);
+      setMarginShown(true); // a new comment is worth seeing
     } else {
       var c = mode.comment, replies = c.replies.slice();
       if (mode.type === 'edit') {
@@ -1662,6 +1673,7 @@
     $('clearComments').addEventListener('click', onClearComments);
     $('exportPdf').addEventListener('click', exportPDF);
     $('toggleSidebar').addEventListener('click', toggleSidebar);
+    $('toggleMargin').addEventListener('click', toggleMargin);
     $('themeToggle').addEventListener('click', toggleDocTheme);
     $('settingsBtn').addEventListener('click', openSettings);
     $('helpBtn').addEventListener('click', function () { showModal('help'); });
@@ -1716,6 +1728,7 @@
       }
       else if (mod && e.key === 's') { e.preventDefault(); writeFile(); }
       else if (mod && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
+      else if (mod && e.shiftKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); toggleMargin(); }
       else if (mod && (e.key === 'r' || e.key === 'R') && !e.shiftKey) { e.preventDefault(); reloadFromDisk(); }
       else if (mod && e.key === 'w' && !e.shiftKey) { e.preventDefault(); closeActiveTab(); }
       else if (e.ctrlKey && e.key === 'Tab') { e.preventDefault(); stepTab(e.shiftKey ? -1 : 1); }
@@ -1741,7 +1754,7 @@
         discardAndReload: discardAndReload, saveCopyAndReload: saveCopyAndReload,
         clearAllComments: clearAllComments,
         pickerStart: pickerStart, setStartDir: setStartDir,
-        toggleSidebar: toggleSidebar, buildTree: buildTree, exportPDF: exportPDF,
+        toggleSidebar: toggleSidebar, toggleMargin: toggleMargin, buildTree: buildTree, exportPDF: exportPDF,
         sidebar: function () { return sidebar; },
         openSettings: openSettings, saveSettings: saveSettings, showModal: showModal,
         closeModal: closeModal, populateVariants: populateVariants,
@@ -1777,6 +1790,7 @@
           else if (a === 'move-tab-new-window') { if (app.active >= 0) moveTabToNewWindow(app.active); }
           else if (a === 'export-pdf') exportPDF();
           else if (a === 'toggle-sidebar') toggleSidebar();
+          else if (a === 'toggle-margin') toggleMargin();
         });
       }
       window.electronAPI.ready();
@@ -1789,6 +1803,7 @@
   async function runSelfTest() {
     var results = [];
     function check(name, cond) { results.push((cond ? 'PASS' : 'FAIL') + ' ' + name); }
+    function byBodyAny(b) { return state.comments.filter(function (c) { return c.body === b; })[0]; }
     function skip(name) { results.push('SKIP ' + name); }
     try {
       var sample =
@@ -2114,6 +2129,32 @@
       check('sidebar collapses on toggle', sidebar.classList.contains('hidden'));
       toggleSidebar();
       check('sidebar expands on toggle', !sidebar.classList.contains('hidden'));
+
+      // --- collapsible comment panel (button, Cmd+Shift+M, reveal on new comment)
+      var keepM = state.source;
+      setSource('First para with a<!-- GK: m1 --> note.\n\nSecond para here.\n');
+      check('comment panel starts shown', marginShown() && getComputedStyle($('gutterRight')).display !== 'none');
+      $('toggleMargin').click();
+      check('the Comments button hides the panel and its gutter',
+        !marginShown() && getComputedStyle($('marginCol')).display === 'none' &&
+        getComputedStyle($('gutterRight')).display === 'none' && $('toggleMargin').classList.contains('off'));
+      check('hiding the panel keeps the span highlights', CSS.highlights.has('gk-span'));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'M', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      check('Cmd+Shift+M shows the panel again', marginShown() && !$('toggleMargin').classList.contains('off'));
+      toggleMargin();
+      check('toggleMargin hides it', !marginShown());
+      (function () {
+        var w = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null), t = null, n;
+        while ((n = w.nextNode())) { if (n.nodeValue.indexOf('Second para') !== -1) { t = n; break; } }
+        var r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 6);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        state.pendingSel = null;
+        beginNewComment();
+        composer.querySelector('textarea').value = 'reveal test';
+        submitComposer();
+      })();
+      check('adding a comment reveals the hidden panel', marginShown() && !!byBodyAny('reveal test'));
+      setSource(keepM);
 
       // --- collapsible, lazy file tree (fake directory handle) -----------
       var mkFile = function (name) {

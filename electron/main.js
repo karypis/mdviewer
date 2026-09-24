@@ -206,6 +206,7 @@ function buildMenu() {
     label: 'View',
     submenu: [
       { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: send('toggle-sidebar') },
+      { label: 'Toggle Comment Panel', accelerator: 'CmdOrCtrl+Shift+M', click: send('toggle-margin') },
       { type: 'separator' },
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
       { type: 'separator' }, { role: 'togglefullscreen' },

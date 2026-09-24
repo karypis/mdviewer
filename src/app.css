@@ -287,6 +287,8 @@ body {
   background: var(--surface);
   min-height: 0;
 }
+#marginCol.hidden, #gutterRight.hidden { display: none; }
+#toggleMargin.off { color: var(--text-dim); text-decoration: line-through; }
 #kindbar {
   flex: 0 0 auto;
   display: flex; gap: 6px; flex-wrap: wrap;

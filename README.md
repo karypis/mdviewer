@@ -51,7 +51,9 @@ in `localStorage` under the key `mdviewer.layout`.
 A **tab strip** sits between the toolbar and the panels, one tab per open file.
 It is hidden until you open something.
 
-Hide the sidebar entirely with the **☰** toolbar button or **⌘B**.
+Hide the sidebar entirely with the **☰** toolbar button or **⌘B**. Hide the
+comment panel with the **Comments** toolbar button or **⌘⇧M**; the text
+highlights stay in the document, and adding a comment shows the panel again.
 
 The toolbar's right end shows the save indicator: **Saved**, **Saving…**,
 **Unsaved**, or **Save error**.
@@ -328,6 +330,7 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 | **⌘S** | Anywhere | Save now |
 | **⌘R** | Anywhere | Reload the open file from disk |
 | **⌘B** | Anywhere | Show or hide the sidebar |
+| **⌘⇧M** | Anywhere | Show or hide the comment panel |
 | **⌘W** | Anywhere | Close the active tab |
 | **Ctrl+Tab** / **Ctrl+⇧Tab** | Anywhere | Next / previous tab |
 | **⌘N** | Desktop app | New window |
@@ -439,7 +442,7 @@ as in the browser.
 cd electron
 npm install            # one-time (downloads Electron)
 npm start              # run the app from source
-npm run selftest       # run the 224-check self-test inside the Electron bundle
+npm run selftest       # run the 230-check self-test inside the Electron bundle
 npm run test:links     # test desktop links with temporary documents
 npm run test:session   # kill the app and check that its tabs come back
 npm run dist           # build both .dmg files into electron/dist/
