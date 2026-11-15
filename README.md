@@ -120,7 +120,14 @@ indented by level. Click a heading to scroll to it.
 
 Links behave differently from a normal page, because a plain click is how you
 enter the editor. **Click** a link to edit the block that contains it.
-**⌘-click** (Ctrl-click on Windows and Linux) to follow the link.
+**⌘-click** (Ctrl-click on Windows and Linux) to follow the link. A
+secondary click on a link (a two-finger click on a trackpad, or a right-click)
+also follows it; elsewhere in the document a secondary click shows the usual
+context menu.
+
+Links may be relative (`../reports/summary.md`) or absolute file URLs
+(`file:///Users/me/reports/summary.md`). An absolute file URL opens even when
+mdviewer does not know the path of the displayed file.
 
 In the desktop app, local `.md`, `.markdown`, and `.txt` links open in mdviewer
 tabs. An already-open file reuses its tab. Relative paths resolve from the folder
@@ -342,6 +349,7 @@ On Windows and Linux, use **Ctrl** wherever this table says **⌘**.
 | **⌘↵** | Comment composer | Save the comment |
 | **Esc** | Comment composer | Cancel the comment |
 | **⌘-click** | On a link | Follow the link (see Reading) |
+| **Two-finger click** | On a link | Follow the link, same as ⌘-click |
 | **⌘O** / **⇧⌘O** | Desktop app | Open File / Open Folder |
 | **⌘P** | Desktop app | Export as PDF |
 

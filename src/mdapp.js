@@ -733,8 +733,12 @@
     if (state.search.open && state.search.query) runSearch(state.search.query, true);
   }
 
+  // DOMPurify's default URL allowlist omits file:, so it would strip the href
+  // from absolute links such as file:///Users/me/notes.md and Cmd-click would
+  // find no link. This pattern is the default with file added.
+  var ALLOWED_URI = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|file):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
   function sanitize(html) {
-    return DOMPurify.sanitize(html, { ADD_ATTR: ['data-gk', 'class'], ADD_TAGS: ['span'] });
+    return DOMPurify.sanitize(html, { ADD_ATTR: ['data-gk', 'class'], ADD_TAGS: ['span'], ALLOWED_URI_REGEXP: ALLOWED_URI });
   }
 
   function renderDocument() {
@@ -1494,6 +1498,17 @@
     if (blockEl) enterEdit(parseInt(blockEl.dataset.idx, 10));
   }
 
+  // A secondary click on a link (two-finger click on a trackpad, or
+  // right-click) follows it, the same as Cmd-click. Elsewhere in the document
+  // the browser's own context menu still appears.
+  function onDocContextMenu(e) {
+    if (e.target.closest('.gkmark')) return;
+    var a = e.target.closest('a[href]');
+    if (!a) return;
+    e.preventDefault();
+    followDocumentLink(a);
+  }
+
   // ---- find in document (⌘F) -------------------------------------------
   // Builds a flat index of the document's text nodes, finds every occurrence of
   // the query, and paints them with the CSS Custom Highlight API (all matches
@@ -1708,6 +1723,7 @@
     setupGutter($('gutterRight'), 'right');
 
     docEl.addEventListener('click', onDocClick);
+    docEl.addEventListener('contextmenu', onDocContextMenu);
     docEl.addEventListener('mouseup', onDocMouseUp);
     commentBtn.addEventListener('click', beginNewComment);
     composer.querySelector('.primary').addEventListener('click', submitComposer);
@@ -2646,15 +2662,26 @@
         window.open = function (href) { opened.push(href); return null; };
         var cmdLinkEv = evMouse(linkEl, 'click', { metaKey: true });
         var ctrlLinkEv = evMouse(linkEl, 'click', { ctrlKey: true });
+        var ctxLinkEv = evMouse(linkEl, 'contextmenu', { button: 2 });
         window.open = origOpen;
         check('Cmd/Ctrl+click opens each browser link once and cancels native navigation',
-          opened.length === 2 && opened.every(function (href) { return href === 'http://example.com/x'; }) &&
+          opened.length === 3 && opened.every(function (href) { return href === 'http://example.com/x'; }) &&
           cmdLinkEv.defaultPrevented && ctrlLinkEv.defaultPrevented && state.editing == null);
+        check('a secondary (two-finger) click on a link follows it and suppresses the context menu',
+          ctxLinkEv.defaultPrevented && state.editing == null);
+        var ctxParaEv = evMouse(docEl.querySelectorAll('.block')[1].querySelector('p'), 'contextmenu', { button: 2 });
+        check('a secondary click off a link keeps the native context menu', !ctxParaEv.defaultPrevented);
       } else {
         skip('desktop link navigation (covered by npm run test:links)');
       }
       evMouse(docEl.querySelector('.gkmark'), 'click');
       check('click on a comment marker opens no editor', state.editing == null);
+      var srcBeforeHref = state.source;
+      setSource('[abs](file:///Users/me/notes.md) [rel](../notes.md) [bad](javascript:alert(1))\n');
+      var hrefs = Array.from(docEl.querySelectorAll('a')).map(function (x) { return x.getAttribute('href'); });
+      check('file: links keep their href through sanitizing; javascript: links lose it',
+        hrefs[0] === 'file:///Users/me/notes.md' && hrefs[1] === '../notes.md' && hrefs[2] == null);
+      setSource(srcBeforeHref);
 
       // --- onDocMouseUp: releasing a selection shows the comment button ------
       var tnode = null, tw = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null), tn2;
